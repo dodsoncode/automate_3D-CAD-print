@@ -4,6 +4,8 @@ Pipeline: Python CAD -> Bambu Studio multi-material 3MF -> slice -> send to a Ba
 Goal project: a simple multi-piece 3D-printed walking robot driven by a microcontroller.
 
 ## Layout
+- `design/` - robot architecture, bill of materials, wiring/pin map/power budget, mechanical design.
+- `firmware/` - MicroPython for the ESP32 (gait, servo driver, Wi-Fi remote, calibration) with desktop tests.
 - `cad/make_cube_disk_3mf.py` - writes a 2-material 3MF (20 mm cube = filament 1, 10 mm x 0.5 mm disk on top = filament 2). No dependencies.
 - `printer/bambu_send.py` - `status`, `send`, `slice` for a P1S over LAN (needs `pip install paho-mqtt`).
 - `examples/cube_disk_2color.3mf` - generated example.

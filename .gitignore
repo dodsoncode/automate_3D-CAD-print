@@ -1,3 +1,6 @@
 printer/bambu_config.json
 __pycache__/
 *.gcode.3mf
+__pycache__/
+.pytest_cache/
+firmware/src/calib.json
