@@ -58,3 +58,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: PLAN.md has a Kid Edition track; Phase 2 CAD now produced by the GUI. TASKS.md has TK1-TK9; T2.4-T2.9 marked superseded.
 - Honesty: prices other than the Kitronik board (seen at 12.30 GBP) are unverified estimates; nothing here is hardware-tested.
 - NEXT: K3 - Walker Designer GUI (`gui/`).
+
+#### Step K3a: GUI architecture decided, starting modules (in progress)
+- Decision: the designer GUI is the single source of geometry for the kid edition. Parts are built as extruded 2D profiles with holes (closed shells, shared vertices) - no CSG library needed; each leg part is identical for all 4 legs (rotated copies), so only 3 leg part types + body.
+- Decision: files `gui/js/{gait,geom,model,export3mf}.js` (UMD, testable) + `gui/index.html` (UI, three.js preview with walking animation). three.js r128 + JSZip vendored under `gui/vendor/` (works offline; no CDN needed).
+- Decision: export = zip with design JSON, one 3MF per print plate (parts packed on a 256 mm bed), README with filament slots. Uses the same 3MF structure as `cad/make_cube_disk_3mf.py` (still unconfirmed in Bambu Studio - T1.1).
+- NEXT: write gait.js (port of firmware/src/gait.py) + parity test, then geom.js.
