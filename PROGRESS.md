@@ -96,3 +96,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: script-checked only. NOT loaded into the MakeCode editor (block wording, I2C return codes on a real micro:bit are unverified) and NOT run on hardware.
 - DONE: TASKS.md TK3-TK5 ticked.
 - NEXT: K5 - open the PR (carries the earlier `log-merge-pr3` fix too). Do not merge until Jacob asks.
+
+### 2026-10-20 - K5: PR opened
+- DONE: PR #4 `kid-edition` -> `main` opened (includes the `log-merge-pr3` fix). Not merged; waiting for Jacob.
+- Open for Jacob: TK6-TK9 in TASKS.md (buy BOM, measure parts, open a GUI 3MF in Bambu Studio, print one leg, confirm board I2C address, bench-test levels 0-3).
+- NEXT: Jacob reviews / says merge.
