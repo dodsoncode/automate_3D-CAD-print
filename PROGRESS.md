@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 - Foundation (see PLAN.md)
-- **Now:** writing TASKS.md (PLAN.md done)
+- **Now:** adding CLAUDE.md working rule + README links (PLAN.md, TASKS.md done)
 - **Next:** parametric CAD for the walker printed parts
 
 ## Log
@@ -27,3 +27,7 @@ _(updated at the end of every step)_
 ### 2026-10-20 - Step 2: PLAN.md
 - DONE: `PLAN.md` - goal, success criteria, current state, phases 0-6, critical path, risks, working agreements.
 - NEXT: `TASKS.md`.
+
+### 2026-10-20 - Step 3: TASKS.md
+- DONE: `TASKS.md` - tasks T0-T6 by phase with owner (J/C), verification level, open decisions D1-D4.
+- NEXT: record the progress-update rule in `CLAUDE.md`, link the three files from README, push, open PR.
