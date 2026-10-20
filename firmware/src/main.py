@@ -25,7 +25,8 @@ class Robot:
         signs, offsets = config.load_calib()
         self.servos = Servos(pca, config.CHANNELS, signs, offsets, config.LIMITS,
                              config.SERVO_US_MIN, config.SERVO_US_MAX, config.SERVO_RANGE_DEG)
-        self.walker = Walker(config.GAIT_STRIDE_DEG, config.GAIT_LIFT_DEG, config.GAIT_PERIOD_S)
+        self.walker = Walker(config.GAIT_STRIDE_DEG, config.GAIT_LIFT_DEG, config.GAIT_PERIOD_S,
+                             sway_deg=config.GAIT_SWAY_DEG, splay_deg=config.GAIT_SPLAY_DEG)
         self.adc = ADC(Pin(config.BATT_PIN))
         self.adc.atten(ADC.ATTN_11DB)
         self.led = Pin(config.STATUS_LED, Pin.OUT)

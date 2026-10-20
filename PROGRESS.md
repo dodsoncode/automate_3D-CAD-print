@@ -70,3 +70,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `gui/js/geom.js` - extruded polygons with holes -> closed shells, rotations/mirrors keep triangles outward, volume/bbox/closedness checks. Smoke-tested: box 1000 mm3, box with hole 880 mm3 (exact), all shells closed, volumes unchanged after rotX/mirror/extrudeUW/extrudeVW.
 - DONE: vendored three.js r128, OrbitControls, JSZip 3.10.1 (both MIT) in `gui/vendor/`.
 - NEXT: `gui/js/model.js` (parameters -> layout -> parts -> checks), then `export3mf.js`.
+
+### 2026-10-20 - K3c: weight-shift gait ("sway") and robust geometry kit
+- DONE: Found the design failed its own stability check (support-polygon margin about -3.5 mm): a symmetric 4-leg walker tipped when a foot lifted. Fix = (1) stance hips nudge the body away from the lifted corner ("sway", `GAIT_SWAY_DEG` = 8), (2) swing shortened from 25% to 20% of the cycle so all four feet are down briefly (`SLOT_SPACING` stays 0.25), (3) sway eases in 8% of a cycle before a lift and out 5% after landing.
+- DONE: Same maths in `firmware/src/gait.py` and `gui/js/gait.js`; parity test includes a sway scenario. Firmware tests 27 pass, GUI parity tests 3 pass (script-checked).
+- DONE: `gui/js/geom.js` robustness (collinear-hole perturbation, triangle orientation, triangle-count assertion); `gui/js/model.js` parametric model. All 31 shells closed with positive volume for the default and 4 presets; stability margin now +4.2 to +8.8 mm (modelled, not measured).
+- Verification: script-checked only. Real servo speed (swing is now about 200 deg/s peak, MG90S limit is higher), real centre of mass and real foot friction are unverified.
+- NEXT: `gui/js/export3mf.js`, then `gui/index.html` (K3 continues), then K4 MakeCode path, K5 publish + PR.

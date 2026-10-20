@@ -91,22 +91,57 @@
   }
 
   // ---------- extrusion ----------
+  // Make every cap triangle counter-clockwise. Zero-area triangles (three collinear points, which happen when
+  // hole corners line up) have no orientation of their own, so they copy it from a neighbour sharing an edge.
+  function orientTriangles(tri, pts) {
+    var n = tri.length, done = [], i, k, c;
+    for (i = 0; i < n; i++) {
+      var a = tri[i][0], b = tri[i][1], cc = tri[i][2];
+      var area = (pts[b][0] - pts[a][0]) * (pts[cc][1] - pts[a][1]) - (pts[cc][0] - pts[a][0]) * (pts[b][1] - pts[a][1]);
+      if (Math.abs(area) > 1e-9) { if (area < 0) { tri[i][1] = cc; tri[i][2] = b; } done.push(true); } else done.push(false);
+    }
+    var edges = {};
+    function key(x, y) { return x < y ? x + '_' + y : y + '_' + x; }
+    for (i = 0; i < n; i++) for (k = 0; k < 3; k++) { var kk = key(tri[i][k], tri[i][(k + 1) % 3]); (edges[kk] = edges[kk] || []).push(i); }
+    var changed = true, guard = 0;
+    while (changed && guard++ < 100) {
+      changed = false;
+      for (i = 0; i < n; i++) {
+        if (done[i]) continue;
+        for (k = 0; k < 3 && !done[i]; k++) {
+          var x = tri[i][k], y = tri[i][(k + 1) % 3], list = edges[key(x, y)];
+          for (c = 0; c < list.length; c++) {
+            var j = list[c]; if (j === i || !done[j]) continue;
+            var sameDir = false;
+            for (var m = 0; m < 3; m++) if (tri[j][m] === x && tri[j][(m + 1) % 3] === y) sameDir = true;
+            if (sameDir) { var tmp = tri[i][1]; tri[i][1] = tri[i][2]; tri[i][2] = tmp; }
+            done[i] = true; changed = true; break;
+          }
+        }
+      }
+    }
+  }
+
   function extrude(outer, holes, z0, z1) {
     outer = asCCW(outer); holes = (holes || []).map(asCW);
     var rings = [outer].concat(holes), pts = [], starts = [], r, i;
     for (r = 0; r < rings.length; r++) { starts.push(pts.length); for (i = 0; i < rings[r].length; i++) pts.push(rings[r][i]); }
+    // Symbolic perturbation: hole corners that line up exactly make the triangulator drop zero-area triangles and
+    // leave the cap with gaps. Nudge every point by <= 2 microns (far below print resolution), deterministically.
+    pts = pts.map(function (q, idx) { return [q[0] + 0.002 * Math.sin(idx * 12.9898 + 1.3), q[1] + 0.002 * Math.sin(idx * 78.233 + 2.1)]; });
+    for (r = 0, i = 0; r < rings.length; r++) rings[r] = rings[r].map(function () { return pts[i++]; });
+    outer = rings[0]; holes = rings.slice(1);
     var N = pts.length, v = [], t = [];
     for (i = 0; i < N; i++) v.push(pts[i][0], pts[i][1], z0);
     for (i = 0; i < N; i++) v.push(pts[i][0], pts[i][1], z1);
     var tri = THREE.ShapeUtils.triangulateShape(
       outer.map(function (p) { return new THREE.Vector2(p[0], p[1]); }),
       holes.map(function (h) { return h.map(function (p) { return new THREE.Vector2(p[0], p[1]); }); }));
+    if (tri.length !== N + 2 * holes.length - 2) throw new Error('triangulation incomplete (' + tri.length + ' of ' + (N + 2 * holes.length - 2) + ' triangles)');
+    orientTriangles(tri, pts);
     for (i = 0; i < tri.length; i++) {
-      var a = tri[i][0], b = tri[i][1], c = tri[i][2];
-      var area = (pts[b][0] - pts[a][0]) * (pts[c][1] - pts[a][1]) - (pts[c][0] - pts[a][0]) * (pts[b][1] - pts[a][1]);
-      if (area < 0) { var tmp = b; b = c; c = tmp; }
-      t.push(N + a, N + b, N + c);      // top cap, normal +z
-      t.push(a, c, b);                  // bottom cap, normal -z
+      t.push(N + tri[i][0], N + tri[i][1], N + tri[i][2]);      // top cap, normal +z
+      t.push(tri[i][0], tri[i][2], tri[i][1]);                  // bottom cap, normal -z
     }
     for (r = 0; r < rings.length; r++) {
       var n = rings[r].length, s = starts[r];
