@@ -43,3 +43,12 @@ _(updated at the end of every step)_
 ### 2026-10-20 - Step 6: merge PR #3
 - DONE: PR #3 merged; PLAN.md, TASKS.md, PROGRESS.md, CLAUDE.md are on `main`.
 - NEXT: T1.1 (Jacob: open the test 3MF in Bambu Studio). Phase 2 CAD can start in parallel.
+
+### 2026-10-20 - Kid Edition request (Jacob's 9-year-old designs, programs and assembles the robot)
+Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3) parametric design GUI, (4) kid programming path, (5) PR. Branch `kid-edition` (also carries the unmerged `log-merge-pr3` fix).
+
+#### Step K1: verify kid-friendly hardware
+- DONE (web-checked, not hands-on): Kitronik Compact 16 Servo Driver Board for micro:bit - PCA9685, 16 servo channels, 3-12 V supply (servos powered from the same supply), terminal block or servo-style power connector with on/off switch, board regulates 3.3 V for the micro:bit, V1+V2 compatible, 68 x 46.5 x 10.6 mm, no soldering mentioned, MakeCode extension "Kitronik I2C-16-servo". One UK retailer showed "only 3 left" and Pimoroni lists it as no longer stocked -> availability risk, alternatives needed.
+- NOT VERIFIED: the board's I2C address (could not read the Kitronik source) -> our extension will auto-detect 0x40 / 0x6C instead of assuming. MakeCode dependency syntax also unconfirmed -> extension will be standalone (talks to the PCA9685 directly).
+- Fact checked on the way: MakeCode extensions can be added in the editor by pasting a github.com URL (Import URL); no approval needed for exact URLs.
+- NEXT: K2 - write `design/kid-edition.md`, update BOM/PLAN/TASKS.
