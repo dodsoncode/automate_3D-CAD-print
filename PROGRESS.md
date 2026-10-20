@@ -59,8 +59,14 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Honesty: prices other than the Kitronik board (seen at 12.30 GBP) are unverified estimates; nothing here is hardware-tested.
 - NEXT: K3 - Walker Designer GUI (`gui/`).
 
-#### Step K3a: GUI architecture decided, starting modules (in progress)
+#### Step K3a: GUI architecture decided
 - Decision: the designer GUI is the single source of geometry for the kid edition. Parts are built as extruded 2D profiles with holes (closed shells, shared vertices) - no CSG library needed; each leg part is identical for all 4 legs (rotated copies), so only 3 leg part types + body.
 - Decision: files `gui/js/{gait,geom,model,export3mf}.js` (UMD, testable) + `gui/index.html` (UI, three.js preview with walking animation). three.js r128 + JSZip vendored under `gui/vendor/` (works offline; no CDN needed).
 - Decision: export = zip with design JSON, one 3MF per print plate (parts packed on a 256 mm bed), README with filament slots. Uses the same 3MF structure as `cad/make_cube_disk_3mf.py` (still unconfirmed in Bambu Studio - T1.1).
 - NEXT: write gait.js (port of firmware/src/gait.py) + parity test, then geom.js.
+
+#### Step K3b: gait.js and geom.js
+- DONE: `gui/js/gait.js` (JS port of `firmware/src/gait.py`). Parity test `gui/tests/test_gait_parity.py` runs both on a 14.5 s scripted sequence (forward, spin, reverse, mixed, stop) and compares: max difference < 1e-9. Desktop-tested.
+- DONE: `gui/js/geom.js` - extruded polygons with holes -> closed shells, rotations/mirrors keep triangles outward, volume/bbox/closedness checks. Smoke-tested: box 1000 mm3, box with hole 880 mm3 (exact), all shells closed, volumes unchanged after rotX/mirror/extrudeUW/extrudeVW.
+- DONE: vendored three.js r128, OrbitControls, JSZip 3.10.1 (both MIT) in `gui/vendor/`.
+- NEXT: `gui/js/model.js` (parameters -> layout -> parts -> checks), then `export3mf.js`.
