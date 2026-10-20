@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Now:** PR open for review (PLAN.md, TASKS.md, PROGRESS.md, CLAUDE.md)
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -39,3 +39,7 @@ _(updated at the end of every step)_
 ### 2026-10-20 - Step 5: push and PR
 - DONE: branch `project-plan` pushed; PR opened (see GitHub PR #3).
 - NEXT: Jacob reviews/merges; then Phase 1 (T1.1) and Phase 2 CAD.
+
+### 2026-10-20 - Step 6: merge PR #3
+- DONE: PR #3 merged; PLAN.md, TASKS.md, PROGRESS.md, CLAUDE.md are on `main`.
+- NEXT: T1.1 (Jacob: open the test 3MF in Bambu Studio). Phase 2 CAD can start in parallel.

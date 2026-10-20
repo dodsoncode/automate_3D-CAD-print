@@ -12,7 +12,7 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] T0.3 Robot architecture, BOM, wiring, mechanical docs (`design/`)
 - [x] T0.4 ESP32 firmware + 24 desktop tests (`firmware/`) - verified: desktop
 - [x] T0.5 Repo workflow: branches + PRs merged to `main`
-- [~] T0.6 PLAN.md / TASKS.md / PROGRESS.md (this PR)
+- [x] T0.6 PLAN.md / TASKS.md / PROGRESS.md (merged, PR #3)
 
 ## Phase 1 - Prove the pipeline on the real printer
 - [ ] T1.1 (J) Open `examples/cube_disk_2color.3mf` in Bambu Studio; report whether the cube and disk show as two parts on filaments 1 and 2
