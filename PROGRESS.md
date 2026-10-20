@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 - Foundation (see PLAN.md)
-- **Now:** writing PLAN.md, TASKS.md, PROGRESS.md
+- **Now:** writing TASKS.md (PLAN.md done)
 - **Next:** parametric CAD for the walker printed parts
 
 ## Log
@@ -23,3 +23,7 @@ _(updated at the end of every step)_
 ### 2026-10-20 - Step 1: merge PR #2
 - DONE: PR #2 merged; local `main` updated (00c6380).
 - NEXT: create PLAN.md, TASKS.md.
+
+### 2026-10-20 - Step 2: PLAN.md
+- DONE: `PLAN.md` - goal, success criteria, current state, phases 0-6, critical path, risks, working agreements.
+- NEXT: `TASKS.md`.
