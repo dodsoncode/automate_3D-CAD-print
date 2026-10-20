@@ -89,3 +89,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `gui/build_artifact.py` -> `gui/walker-designer.html` (single file for offline use) and published as a claude.ai artifact (private).
 - Verification: desktop-tested in headless Chromium (6 browser tests + 3 parity tests): no console errors, feet on floor, +hip moves each foot forward, slider rebuilds, exported 3MFs pass `cad/validate_3mf.py`, no sideways scroll at 390 px. NOT tested: real tablet touch use, Bambu Studio import (T1.1), real part sizes, the artifact's download button (needs the viewer's confirmation).
 - NEXT: K4 MakeCode path (`makecode-kid/`), then K5 PR.
+
+### 2026-10-20 - K4: MakeCode path for the kid
+- DONE: `makecode-kid/` - `gait.ts` (port of `gait.py`), `walker.ts` (PCA9685 driver that auto-detects 0x40 / 0x6C, blocks: start, stand, walk, walk for N seconds, stop, set leg, relax, step size, foot lift, speed, lean, nudge, flip, wiggle), `dist/custom.ts` (single file to paste into a MakeCode project), `build_custom.py`, `README.md`, lessons level 0-4.
+- DONE: `makecode-kid/tests/test_ts_parity.py` - TypeScript gait equals Python gait to 1e-9 over 3 scenarios (incl. turning, sway, ramps); fake-board checks: stand = 1500 us on all 8 channels, front-left hip sign matches firmware, finds board at 0x6C, sad face if no board. 7 tests pass (needs node + the `typescript` npm package).
+- Verification: script-checked only. NOT loaded into the MakeCode editor (block wording, I2C return codes on a real micro:bit are unverified) and NOT run on hardware.
+- DONE: TASKS.md TK3-TK5 ticked.
+- NEXT: K5 - open the PR (carries the earlier `log-merge-pr3` fix too). Do not merge until Jacob asks.

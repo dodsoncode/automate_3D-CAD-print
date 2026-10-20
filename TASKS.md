@@ -17,9 +17,9 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 ## Kid Edition (added 2026-10-20)
 - [x] TK1 Verify kid-friendly hardware choices on the web (micro:bit V2, Kitronik 16-servo board, AA pack) - verified: web only
 - [x] TK2 `design/kid-edition.md`: roles, component swaps, BOM, safety, programming ladder
-- [ ] TK3 Walker Designer GUI (`gui/`): live 3D preview, kid sliders, checks, finalize -> params.json + 3MF
-- [ ] TK4 Validate GUI-exported 3MF with `cad/validate_3mf.py` (closed meshes, bed fit, extruders)
-- [ ] TK5 MakeCode `walker` extension + starter lessons (`makecode-kid/`), gait parity-tested vs `gait.py`
+- [x] TK3 Walker Designer GUI (`gui/`): live 3D preview, kid sliders, checks, finish -> zip of 3MF plates + design json (desktop-tested; published as artifact)
+- [x] TK4 Validate GUI-exported 3MF with `cad/validate_3mf.py` (closed meshes, bed fit, extruders) - passes (script-checked)
+- [x] TK5 MakeCode `walker` blocks + lessons (`makecode-kid/`), gait parity-tested vs `gait.py` (NOT yet loaded in the MakeCode editor)
 - [ ] TK6 (J) Buy kid BOM; measure battery holder, Kitronik board stack, servos; enter in GUI
 - [ ] TK7 (J) Open GUI-exported 3MF in Bambu Studio (same check as T1.1); print one leg to test servo fit
 - [ ] TK8 (J) Confirm driver board I2C address / extension on the real board with the micro:bit
