@@ -7,9 +7,9 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 
 _(updated at the end of every step)_
 
-- **Phase:** 0 - Foundation (see PLAN.md)
-- **Now:** adding CLAUDE.md working rule + README links (PLAN.md, TASKS.md done)
-- **Next:** parametric CAD for the walker printed parts
+- **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
+- **Now:** pushing branch and opening PR (PLAN.md, TASKS.md, CLAUDE.md, README links done)
+- **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
 
@@ -31,3 +31,7 @@ _(updated at the end of every step)_
 ### 2026-10-20 - Step 3: TASKS.md
 - DONE: `TASKS.md` - tasks T0-T6 by phase with owner (J/C), verification level, open decisions D1-D4.
 - NEXT: record the progress-update rule in `CLAUDE.md`, link the three files from README, push, open PR.
+
+### 2026-10-20 - Step 4: CLAUDE.md and README links
+- DONE: `CLAUDE.md` records the "update PROGRESS.md after every step" rule so it persists across sessions; README links PLAN/TASKS/PROGRESS.
+- NEXT: push branch `project-plan`, open PR.
