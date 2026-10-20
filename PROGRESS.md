@@ -82,3 +82,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `gui/js/export3mf.js` - one Bambu-style 3MF per print plate (same layout as the Python writer, per-part AMS slot), plus `walker_design.json` and `README.txt`, all in one zip. Deterministic output.
 - DONE: `cad/validate_3mf.py` - independent check (closed oriented meshes, positive volume, bed fit, extruder 1-4). Default design: 1 plate, 13 objects, 14 meshes, all OK; the original cube+disk example also OK. Script-checked only; still NOT opened in Bambu Studio (T1.1).
 - NEXT: `gui/index.html` (3D preview, sliders, checks, finish button), then Playwright tests.
+
+### 2026-10-20 - K3e: Walker Designer GUI built and published
+- DONE: `gui/index.html` - 3D preview (walking animation, Angle/Top/Side/Front, motors on/off, print-plate view), kid-worded sliders on Body/Legs/Walking pages, 4-slot AMS color picker and per-part slot assignment, My parts (battery presets, measured motor/board sizes), Finish page (traffic-light checks, plastic/time estimate, zip of 3MF plates + design + walking numbers). Saves your design in the browser; Save/Open design file; Start over.
+- DONE: defaults retuned so the starting design shows all green (sway 14 deg, corner radius 3 mm). `firmware/src/config.py` GAIT_SWAY_DEG now 14 to match.
+- DONE: `gui/build_artifact.py` -> `gui/walker-designer.html` (single file for offline use) and published as a claude.ai artifact (private).
+- Verification: desktop-tested in headless Chromium (6 browser tests + 3 parity tests): no console errors, feet on floor, +hip moves each foot forward, slider rebuilds, exported 3MFs pass `cad/validate_3mf.py`, no sideways scroll at 390 px. NOT tested: real tablet touch use, Bambu Studio import (T1.1), real part sizes, the artifact's download button (needs the viewer's confirmation).
+- NEXT: K4 MakeCode path (`makecode-kid/`), then K5 PR.

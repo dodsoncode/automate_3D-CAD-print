@@ -29,7 +29,7 @@
   };
 
   var RANGES = {
-    extraLength: [0, 40, 1], extraWidth: [0, 40, 1], cornerRadius: [4, 24, 1],
+    extraLength: [0, 40, 1], extraWidth: [0, 40, 1], cornerRadius: [2, 24, 1],
     coxaLen: [30, 60, 1], femurLen: [35, 95, 1], stanceAngle: [30, 75, 1], legWidth: [9, 16, 0.5],
     legThick: [2.6, 5, 0.2], legSplay: [30, 80, 1], footSize: [14, 32, 1], tipDrop: [8, 16, 1],
     stride: [8, 30, 1], lift: [10, 35, 1], period: [0.8, 3, 0.1], sway: [0, 15, 1]
@@ -38,10 +38,10 @@
   function defaults() {
     return {
       version: 1, name: 'My Walker',
-      extraLength: 0, extraWidth: 0, cornerRadius: 12, floorT: 3.5,
+      extraLength: 0, extraWidth: 0, cornerRadius: 3, floorT: 3.5,
       coxaLen: 34, femurLen: 55, stanceAngle: 45, legWidth: 10, legThick: 3.2, legSplay: 50,
       footSize: 20, tipDrop: 8, footH: 9,
-      stride: 20, lift: 25, period: 1.6, sway: 8,
+      stride: 20, lift: 25, period: 1.6, sway: 14,
       ams: [{ name: 'Sky blue', hex: '#3aa7ff' }, { name: 'Orange', hex: '#ff8a1f' },
             { name: 'Lime', hex: '#7ed321' }, { name: 'Pink', hex: '#ff5fa2' }],
       slots: { body: 1, trim: 2, FL: 2, FR: 3, RL: 4, RR: 1, feet: 0 },   // feet 0 = same color as the leg
@@ -99,7 +99,7 @@
       return ok;
     }
     while (r > 0.5 && !tabsInside(r)) r -= 0.5;
-    d.cornerR = r; d.cornerLimited = r < req - 1e-6; d.cornerWanted = req;
+    d.cornerR = r; d.cornerLimited = r < req - 1.0; d.cornerWanted = req;
     d.outline = G.rrect(0, 0, 2 * d.halfLx, 2 * d.halfLy, d.cornerR, 8);
 
     // vertical stack at the hip (servo hangs shaft-down through the plate, tabs rest on top)

@@ -4,7 +4,7 @@
  * UMD: browser global WalkerExport, or require() in Node (tests). Needs JSZip passed in by the caller. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.WalkerExport = factory();
+  else { root.WD = root.WD || {}; root.WD.export3mf = factory(); }
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
   var NS_CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
@@ -109,7 +109,7 @@
       '',
       'Filament slots:'].concat(info.colors.map(function (c, i) { return '  Slot ' + (i + 1) + ': ' + c; })).concat([
       '', info.plates + ' plate(s), about ' + info.grams + ' g of plastic, about ' + info.hours + ' h of printing.',
-      '', 'walker_design.json holds every setting. Open the designer and use "Load design" to change it later.',
+      '', 'robot_settings.txt has the walking numbers for the robot code. walker_design.json holds every setting. Open the designer and use "Load design" to change it later.',
       'Not yet test-printed: print ONE leg first and check the servo fits (see design/kid-edition.md).']).join('\n') + '\n';
   }
 
@@ -128,6 +128,7 @@
     });
     return Promise.all(jobs).then(function () {
       outer.file('walker_design.json', JSON.stringify({ app: 'Walker Designer', version: 1, params: params }, null, 1));
+      outer.file('robot_settings.txt', 'GAIT_STRIDE_DEG = ' + params.stride + '\nGAIT_LIFT_DEG = ' + params.lift + '\nGAIT_PERIOD_S = ' + params.period + '\nGAIT_SWAY_DEG = ' + params.sway + '\nGAIT_SPLAY_DEG = ' + params.legSplay + '\n');
       outer.file('README.txt', readme({ colors: params.ams.map(function (c) { return c.name; }), plates: plates.length,
         grams: Math.round(an.grams), hours: (an.grams * 2.2 / 60).toFixed(1) }));
       return outer.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
