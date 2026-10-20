@@ -14,6 +14,17 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] T0.5 Repo workflow: branches + PRs merged to `main`
 - [x] T0.6 PLAN.md / TASKS.md / PROGRESS.md (merged, PR #3)
 
+## Kid Edition (added 2026-10-20)
+- [x] TK1 Verify kid-friendly hardware choices on the web (micro:bit V2, Kitronik 16-servo board, AA pack) - verified: web only
+- [x] TK2 `design/kid-edition.md`: roles, component swaps, BOM, safety, programming ladder
+- [ ] TK3 Walker Designer GUI (`gui/`): live 3D preview, kid sliders, checks, finalize -> params.json + 3MF
+- [ ] TK4 Validate GUI-exported 3MF with `cad/validate_3mf.py` (closed meshes, bed fit, extruders)
+- [ ] TK5 MakeCode `walker` extension + starter lessons (`makecode-kid/`), gait parity-tested vs `gait.py`
+- [ ] TK6 (J) Buy kid BOM; measure battery holder, Kitronik board stack, servos; enter in GUI
+- [ ] TK7 (J) Open GUI-exported 3MF in Bambu Studio (same check as T1.1); print one leg to test servo fit
+- [ ] TK8 (J) Confirm driver board I2C address / extension on the real board with the micro:bit
+- [ ] TK9 (J+kid) Level 0-3 programming on the bench with servos, then assemble
+
 ## Phase 1 - Prove the pipeline on the real printer
 - [ ] T1.1 (J) Open `examples/cube_disk_2color.3mf` in Bambu Studio; report whether the cube and disk show as two parts on filaments 1 and 2
 - [ ] T1.2 (C) If T1.1 fails: fix the 3MF structure (match a Studio-exported reference 3MF); regenerate
@@ -23,7 +34,7 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] T1.6 (J+C) Export a sliced `.gcode.3mf` from Studio and send it with `bambu_send.py send`; fix any FTP/MQTT issues found
 - [ ] T1.7 (C) Record what worked on real hardware in README/PROGRESS; mark the verified level
 
-## Phase 2 - Walker CAD (`cad/walker/`)
+## Phase 2 - Walker CAD (superseded by the Kid Edition GUI: tasks T2.4-T2.9 are produced by `gui/`)
 - [ ] T2.1 (J) Measure the servos you buy (body, tab spacing, shaft offset, horn) with calipers; send the numbers
 - [ ] T2.2 (C) Choose CAD backend (build123d/CadQuery vs mesh booleans); install and smoke-test it here
 - [ ] T2.3 (C) `params.py` with all servo/part dimensions and clearances

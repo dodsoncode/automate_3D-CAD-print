@@ -52,3 +52,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT VERIFIED: the board's I2C address (could not read the Kitronik source) -> our extension will auto-detect 0x40 / 0x6C instead of assuming. MakeCode dependency syntax also unconfirmed -> extension will be standalone (talks to the PCA9685 directly).
 - Fact checked on the way: MakeCode extensions can be added in the editor by pasting a github.com URL (Import URL); no approval needed for exact URLs.
 - NEXT: K2 - write `design/kid-edition.md`, update BOM/PLAN/TASKS.
+
+#### Step K2: kid edition design doc and plan updates
+- DONE: `design/kid-edition.md` (roles kid/adult, component swaps with reasons, kid BOM ~$70-100, power note, mechanical changes, programming ladder, first power-on rules, open items); pointer added in `design/README.md`.
+- DONE: PLAN.md has a Kid Edition track; Phase 2 CAD now produced by the GUI. TASKS.md has TK1-TK9; T2.4-T2.9 marked superseded.
+- Honesty: prices other than the Kitronik board (seen at 12.30 GBP) are unverified estimates; nothing here is hardware-tested.
+- NEXT: K3 - Walker Designer GUI (`gui/`).
