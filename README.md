@@ -3,6 +3,11 @@
 Pipeline: Python CAD -> Bambu Studio multi-material 3MF -> slice -> send to a Bambu P1S (AMS) over LAN.
 Goal project: a simple multi-piece 3D-printed walking robot driven by a microcontroller.
 
+## Project docs
+- [PLAN.md](PLAN.md) - big-picture plan, phases, risks
+- [TASKS.md](TASKS.md) - task list by phase (owner, verification level)
+- [PROGRESS.md](PROGRESS.md) - step-by-step progress log, updated as work happens
+
 ## Layout
 - `design/` - robot architecture, bill of materials, wiring/pin map/power budget, mechanical design.
 - `firmware/` - MicroPython for the ESP32 (gait, servo driver, Wi-Fi remote, calibration) with desktop tests.
