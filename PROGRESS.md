@@ -77,3 +77,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `gui/js/geom.js` robustness (collinear-hole perturbation, triangle orientation, triangle-count assertion); `gui/js/model.js` parametric model. All 31 shells closed with positive volume for the default and 4 presets; stability margin now +4.2 to +8.8 mm (modelled, not measured).
 - Verification: script-checked only. Real servo speed (swing is now about 200 deg/s peak, MG90S limit is higher), real centre of mass and real foot friction are unverified.
 - NEXT: `gui/js/export3mf.js`, then `gui/index.html` (K3 continues), then K4 MakeCode path, K5 publish + PR.
+
+### 2026-10-20 - K3d: 3MF export + independent validator
+- DONE: `gui/js/export3mf.js` - one Bambu-style 3MF per print plate (same layout as the Python writer, per-part AMS slot), plus `walker_design.json` and `README.txt`, all in one zip. Deterministic output.
+- DONE: `cad/validate_3mf.py` - independent check (closed oriented meshes, positive volume, bed fit, extruder 1-4). Default design: 1 plate, 13 objects, 14 meshes, all OK; the original cube+disk example also OK. Script-checked only; still NOT opened in Bambu Studio (T1.1).
+- NEXT: `gui/index.html` (3D preview, sliders, checks, finish button), then Playwright tests.
