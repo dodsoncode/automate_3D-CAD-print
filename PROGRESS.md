@@ -112,3 +112,11 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `firmware/src/gait.py` + `gui/js/gait.js`: `HexWalker` (tripod gait, 45% swing, three feet always down, no weight shift) and `WhegDrive` (left/right throttle, ramp, simulated hub angle, `wheg_pulse_us` pulse mapping with per-servo stop trim). Hexapod channel order: crab legs keep channels 0-7, middle legs ML 8-9, MR 10-11.
 - Verification: script-checked. Firmware 33 tests pass (6 new); Python vs JS parity < 1e-9 for hexapod poses, wheg speeds and hub angles. Not run on hardware.
 - NEXT: S3 model (style switch, hexapod body, wheg parts, style checks).
+
+### 2026-10-21 - Styles S3: model supports crab, hexapod and windmill rover
+- DONE: `gui/js/model.js` now takes `style` ('crab' | 'hex' | 'wheg'): hexapod = 6 legs with the middle motors beside the bays (body about 124 x 175 mm), tripod gait stability sampling, style-specific check wording; `gui/js/wheg.js` = windmill rover (floor + two motor walls, 4 identical hub-and-spoke legs with tip pads, closed shells, checks: wall thickness, spokes never touch, belly clearance, tip-over angle, climbing torque, spoke stress, pad size, speed, bed fit). Presets per style; `styleDefaults(style)`.
+- DONE: fixed a foot-geometry exception found by the new random sweep (a too-small foot made the pocket cross the disc; geometry now stays valid and the red check explains).
+- Tests: `gui/tests/test_model.py` (6) + `fuzz_model.js`: 300 random designs per style, all shells closed with positive volume, defaults of every style all green, hexapod/wheg behaviours (tripod margin > 12 mm, middle motors outside the bays, overlong spokes flagged, torque rises with a heavy battery, old saved designs load as crab). Exported 3MFs of each style pass `cad/validate_3mf.py`.
+- Finding: the 135 g AA pack is too heavy for FS90R whegs (model says torque is short), so the rover defaults to the 4xAAA holder; hexapod default uses a shorter lower leg (45 mm) for the same reason. Modelled only, not measured.
+- Verification: script-checked only.
+- NEXT: S4 designer UI (style picker, previews, per-style sliders).
