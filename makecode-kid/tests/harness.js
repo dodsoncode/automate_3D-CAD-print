@@ -21,22 +21,29 @@ const walker = new Function(...names, body)(...names.map(n => mocks[n]));
 const sc = JSON.parse(process.argv[2]);
 let out;
 if (sc.mode === 'gait') {
+  walker._setStyle(sc.style || 0);
   walker._reset();
   walker._configure(...sc.cfg);
+  if (sc.wheg) walker._configureWheg(...sc.wheg);
   out = [];
+  const legs = sc.style === 1 ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3];
   sc.steps.forEach(st => {
     walker._command(st.fwd, st.turn);
     for (let i = 0; i < st.n; i++) {
       walker._update(st.dt);
-      out.push([0, 1, 2, 3].map(l => walker._hip(l)).concat([0, 1, 2, 3].map(l => walker._knee(l))));
+      out.push(sc.style === 2 ? [0, 1, 2, 3].map(l => walker._whegSpeed(l)).concat([0, 1, 2, 3].map(l => walker._whegAngle(l)))
+        : legs.map(l => walker._hip(l)).concat(legs.map(l => walker._knee(l))));
     }
   });
+} else if (sc.mode === 'pulse') {
+  out = sc.args.map(a => walker._whegPulse(...a));
 } else {
   state.missing = sc.missing || [];
-  walker.start();
+  if (sc.style !== undefined) walker.startAs(sc.style); else walker.start();
   const ticks = {};
   log.forEach(([a, b]) => { if (b.length === 5) ticks[(b[0] - 6) / 4] = [b[3] | (b[4] << 8), a]; });
   out = { ticks, shown: state.shown, addrs: log.map(l => l[0]).filter((v, i, a) => a.indexOf(v) === i) };
+  if (sc.wheelTrim) { log.length = 0; walker.fixWheelStop(...sc.wheelTrim); const b = log[log.length - 1][1]; out.afterTrim = [(b[0] - 6) / 4, b[3] | (b[4] << 8)]; }
   if (sc.setLeg) {
     log.length = 0; walker.setLeg(...sc.setLeg);
     const b = log[log.length - 1][1]; out.after = [(b[0] - 6) / 4, b[3] | (b[4] << 8)];

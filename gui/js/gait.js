@@ -106,6 +106,93 @@
     return out;
   }
 
+  // ============================================================ hexapod: tripod gait
+  var HEX_LEGS = ['FL', 'FR', 'RL', 'RR', 'ML', 'MR'];
+  var HEX_SIDE = { FL: 'L', ML: 'L', RL: 'L', FR: 'R', MR: 'R', RR: 'R' };
+  var HEX_GROUP = { FL: 0, MR: 0, RL: 0, FR: 1, ML: 1, RR: 1 };
+  var HEX_SWING_FRAC = 0.45;
+  function hexLegPhase(cycleT, leg) { return mod1(cycleT - 0.5 * HEX_GROUP[leg]); }
+  function hexLegProfile(phase) {
+    if (phase < HEX_SWING_FRAC) { var s = phase / HEX_SWING_FRAC; return [-Math.cos(Math.PI * s), Math.sin(Math.PI * s)]; }
+    var s2 = (phase - HEX_SWING_FRAC) / (1.0 - HEX_SWING_FRAC);
+    return [1.0 - 2.0 * s2, 0.0];
+  }
+  function HexWalker(strideDeg, liftDeg, periodS, rampPerS) {
+    this.stride = strideDeg === undefined ? 20.0 : strideDeg;
+    this.lift = liftDeg === undefined ? 25.0 : liftDeg;
+    this.period = periodS === undefined ? 1.4 : periodS;
+    this.ramp = rampPerS === undefined ? 2.0 : rampPerS;
+    this.cycle = 0.0;
+    this.target = { L: 0.0, R: 0.0 };
+    this.scale = { L: 0.0, R: 0.0 };
+    this.liftScale = 0.0;
+  }
+  HexWalker.prototype.command = function (fwd, turn) {
+    fwd = fwd || 0; turn = turn || 0; this.target.L = clamp(fwd - turn); this.target.R = clamp(fwd + turn);
+  };
+  HexWalker.prototype.stop = function () { this.command(0, 0); };
+  HexWalker.prototype.isMoving = function () {
+    return Math.abs(this.scale.L) > 1e-3 || Math.abs(this.scale.R) > 1e-3 || this.liftScale > 1e-3;
+  };
+  HexWalker.prototype.update = function (dt) {
+    var step = this.ramp * dt;
+    this.scale.L = approach(this.scale.L, this.target.L, step);
+    this.scale.R = approach(this.scale.R, this.target.R, step);
+    var want = (Math.abs(this.target.L) > 1e-3 || Math.abs(this.target.R) > 1e-3) ? 1.0 : 0.0;
+    this.liftScale = approach(this.liftScale, want, step);
+    if (this.isMoving()) this.cycle = mod1(this.cycle + dt / this.period);
+    return this.pose();
+  };
+  HexWalker.prototype.pose = function () {
+    var out = {};
+    for (var i = 0; i < HEX_LEGS.length; i++) {
+      var leg = HEX_LEGS[i], pf = hexLegProfile(hexLegPhase(this.cycle, leg));
+      out[leg + '_hip'] = this.stride * this.scale[HEX_SIDE[leg]] * pf[0];
+      out[leg + '_knee'] = this.lift * this.liftScale * pf[1];
+    }
+    return out;
+  };
+  function hexStandPose(heightDeg) {
+    heightDeg = heightDeg || 0; var out = {};
+    for (var i = 0; i < HEX_LEGS.length; i++) { out[HEX_LEGS[i] + '_hip'] = 0.0; out[HEX_LEGS[i] + '_knee'] = -heightDeg; }
+    return out;
+  }
+
+  // ============================================================ wheg rover: continuous-rotation windmill legs
+  function WhegDrive(maxThrottle, rpmFull, rampPerS) {
+    this.maxThrottle = maxThrottle === undefined ? 0.5 : maxThrottle;
+    this.rpmFull = rpmFull === undefined ? 110.0 : rpmFull;
+    this.ramp = rampPerS === undefined ? 2.0 : rampPerS;
+    this.target = { L: 0.0, R: 0.0 };
+    this.scale = { L: 0.0, R: 0.0 };
+    this.angle = { FL: 0.0, FR: 0.0, RL: 0.0, RR: 0.0 };
+  }
+  WhegDrive.prototype.command = function (fwd, turn) {
+    fwd = fwd || 0; turn = turn || 0; this.target.L = clamp(fwd - turn); this.target.R = clamp(fwd + turn);
+  };
+  WhegDrive.prototype.stop = function () { this.command(0, 0); };
+  WhegDrive.prototype.isMoving = function () { return Math.abs(this.scale.L) > 1e-3 || Math.abs(this.scale.R) > 1e-3; };
+  WhegDrive.prototype.speeds = function () {
+    var out = {};
+    for (var i = 0; i < LEGS.length; i++) out[LEGS[i]] = this.scale[SIDE[LEGS[i]]] * this.maxThrottle;
+    return out;
+  };
+  WhegDrive.prototype.update = function (dt) {
+    var step = this.ramp * dt;
+    this.scale.L = approach(this.scale.L, this.target.L, step);
+    this.scale.R = approach(this.scale.R, this.target.R, step);
+    var sp = this.speeds();
+    for (var i = 0; i < LEGS.length; i++) this.angle[LEGS[i]] = mod1((this.angle[LEGS[i]] + sp[LEGS[i]] * this.rpmFull * 6.0 * dt) / 360.0) * 360.0;
+    return sp;
+  };
+  function whegPulseUs(speed, sign, trimUs, spanUs, centerUs) {
+    sign = sign === undefined ? 1 : sign; trimUs = trimUs || 0; spanUs = spanUs === undefined ? 500 : spanUs; centerUs = centerUs === undefined ? 1500 : centerUs;
+    return centerUs + trimUs + sign * clamp(speed) * spanUs;
+  }
+
   return { LEGS: LEGS, SIDE: SIDE, SWING_SLOT: SWING_SLOT, SWING_FRAC: SWING_FRAC, SLOT_SPACING: SLOT_SPACING,
-           legPhase: legPhase, legProfile: legProfile, swayOffset: swayOffset, footTangent: footTangent, Walker: Walker, standPose: standPose };
+           legPhase: legPhase, legProfile: legProfile, swayOffset: swayOffset, footTangent: footTangent, Walker: Walker, standPose: standPose,
+           HEX_LEGS: HEX_LEGS, HEX_SIDE: HEX_SIDE, HEX_GROUP: HEX_GROUP, HEX_SWING_FRAC: HEX_SWING_FRAC,
+           hexLegPhase: hexLegPhase, hexLegProfile: hexLegProfile, HexWalker: HexWalker, hexStandPose: hexStandPose,
+           WhegDrive: WhegDrive, whegPulseUs: whegPulseUs };
 });

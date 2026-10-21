@@ -1,6 +1,8 @@
-// Blocks for the walker robot: micro:bit + PCA9685 servo board + 8 micro servos.
-// Wiring: servo plugs go on board channels 0..7 in this order: front-left hip, front-left knee, front-right hip,
-// front-right knee, rear-left hip, rear-left knee, rear-right hip, rear-right knee.
+// Blocks for the walker robots: micro:bit + PCA9685 servo board. Three styles (see "start walker as"):
+//   crab:    8 micro servos on channels 0..7 in this order: front-left hip, front-left knee, front-right hip,
+//            front-right knee, rear-left hip, rear-left knee, rear-right hip, rear-right knee.
+//   hexapod: the crab 8, plus middle-left hip 8, knee 9, middle-right hip 10, knee 11.
+//   windmill rover: 4 continuous-rotation servos on channels 0..3: front-left, front-right, back-left, back-right.
 // NOT tested yet in the MakeCode editor or on hardware. See makecode-kid/README.md.
 
 enum Leg {
@@ -11,7 +13,20 @@ enum Leg {
     //% block="back left"
     BackLeft = 2,
     //% block="back right"
-    BackRight = 3
+    BackRight = 3,
+    //% block="middle left (hexapod)"
+    MiddleLeft = 4,
+    //% block="middle right (hexapod)"
+    MiddleRight = 5
+}
+
+enum Style {
+    //% block="crab (4 legs)"
+    Crab = 0,
+    //% block="hexapod (6 legs)"
+    Hexapod = 1,
+    //% block="windmill rover (4 spinning legs)"
+    Windmill = 2
 }
 
 enum Joint {
@@ -39,8 +54,12 @@ namespace walker {
     const KNEE_MIN = -30
     const KNEE_MAX = 60
     // + hip moves the foot forward and + knee lifts the foot for every leg: mirrored servos need opposite signs
-    let signs = [-1, 1, 1, -1, -1, 1, 1, -1]
-    let offsets = [0, 0, 0, 0, 0, 0, 0, 0]
+    let signs = [-1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1]
+    let offsets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // windmill rover: + = rolls the robot forward; the right side servos face the other way
+    let wheelSigns = [1, -1, 1, -1]
+    let wheelTrim = [0, 0, 0, 0]
+    let style = 0
     let addr = 0x40
     let freq = 50.03
     let ready = false
@@ -50,6 +69,7 @@ namespace walker {
     let cfgLift = 25
     let cfgPeriod = 1.6
     let cfgSway = 14
+    let cfgThrottle = 0.4
 
     function write2(reg: number, val: number): number {
         let b = pins.createBuffer(2)
@@ -91,11 +111,30 @@ namespace walker {
         setTicks(joint, _ticksFor(pulseFor(_absAngle(joint, rel))))
     }
 
+    function legCount(): number {
+        return style == 1 ? 6 : 4
+    }
+
+    function setWheel(leg: number, speed: number) {
+        if (!ready) return
+        relaxed = false
+        setTicks(leg, _ticksFor(walker._whegPulse(speed, wheelSigns[leg], wheelTrim[leg])))
+    }
+
     function applyWalkPose() {
-        for (let leg = 0; leg < 4; leg++) {
+        if (style == 2) {
+            for (let leg = 0; leg < 4; leg++) setWheel(leg, walker._whegSpeed(leg))
+            return
+        }
+        for (let leg = 0; leg < legCount(); leg++) {
             setJoint(leg * 2, walker._hip(leg))
             setJoint(leg * 2 + 1, walker._knee(leg))
         }
+    }
+
+    // true when this leg does not exist on the chosen robot
+    function noSuchLeg(leg: number): boolean {
+        return style == 2 || leg >= legCount()
     }
 
     function backgroundLoop() {
@@ -125,6 +164,16 @@ namespace walker {
     //% block="start walker"
     //% group="Start" weight=100
     export function start() {
+        startAs(Style.Crab)
+    }
+
+    /**
+     * Wake up the servo board for the robot you built: the crab, the hexapod or the windmill rover.
+     */
+    //% block="start walker as %robot"
+    //% group="Start" weight=95
+    export function startAs(robot: Style) {
+        style = robot
         let found = false
         let tries = [0x40, 0x6c]
         for (let i = 0; i < tries.length; i++) {
@@ -148,8 +197,9 @@ namespace walker {
         walker._reset()
         cfgStride = 20
         cfgLift = 25
-        cfgPeriod = 1.6
+        cfgPeriod = style == 1 ? 1.4 : 1.6
         cfgSway = 14
+        cfgThrottle = 0.4
         pushSettings()
         if (!loopStarted) {
             loopStarted = true
@@ -165,7 +215,11 @@ namespace walker {
     //% group="Start" weight=90
     export function stand() {
         walker._reset()
-        for (let j = 0; j < 8; j++) setJoint(j, 0)
+        if (style == 2) {
+            for (let leg = 0; leg < 4; leg++) setWheel(leg, 0)
+            return
+        }
+        for (let j = 0; j < legCount() * 2; j++) setJoint(j, 0)
     }
 
     /**
@@ -211,6 +265,7 @@ namespace walker {
     //% degrees.min=-45 degrees.max=60 degrees.defl=0
     //% group="Legs" weight=50
     export function setLeg(leg: Leg, joint: Joint, degrees: number) {
+        if (noSuchLeg(leg)) return
         if (walker._moving()) stopWalking()
         setJoint(leg * 2 + joint, degrees)
     }
@@ -222,7 +277,7 @@ namespace walker {
     //% group="Legs" weight=40
     export function relax() {
         walker._reset()
-        for (let j = 0; j < 8; j++) setTicks(j, 4096)
+        for (let j = 0; j < 12; j++) setTicks(j, 4096)
         relaxed = true
     }
 
@@ -270,8 +325,21 @@ namespace walker {
         pushSettings()
     }
 
+    /**
+     * Windmill rover only: how fast the spinning legs go, in percent of their top speed. Start low.
+     */
+    //% block="top speed %percent percent"
+    //% percent.min=10 percent.max=100 percent.defl=40
+    //% group="Settings" weight=26
+    export function setTopSpeed(percent: number) {
+        cfgThrottle = Math.max(0.1, Math.min(1, percent / 100))
+        pushSettings()
+    }
+
     function pushSettings() {
+        walker._setStyle(style)
         walker._configure(cfgStride, cfgLift, cfgPeriod, 2.0, cfgSway, 50)
+        walker._configureWheg(cfgThrottle, 110, 2.0)
     }
 
     /**
@@ -281,6 +349,7 @@ namespace walker {
     //% degrees.min=-20 degrees.max=20 degrees.defl=0
     //% group="Fix a leg" weight=20
     export function nudge(leg: Leg, joint: Joint, degrees: number) {
+        if (noSuchLeg(leg)) return
         offsets[leg * 2 + joint] = degrees
         setJoint(leg * 2 + joint, 0)
     }
@@ -291,6 +360,7 @@ namespace walker {
     //% block="flip direction of %leg %joint"
     //% group="Fix a leg" weight=10
     export function flip(leg: Leg, joint: Joint) {
+        if (noSuchLeg(leg)) return
         signs[leg * 2 + joint] = -signs[leg * 2 + joint]
         setJoint(leg * 2 + joint, 0)
     }
@@ -301,6 +371,7 @@ namespace walker {
     //% block="wiggle %leg %joint"
     //% group="Fix a leg" weight=5
     export function wiggle(leg: Leg, joint: Joint) {
+        if (noSuchLeg(leg)) return
         for (let i = 0; i < 2; i++) {
             setLeg(leg, joint, 15)
             basic.pause(300)
@@ -308,5 +379,41 @@ namespace walker {
             basic.pause(300)
         }
         setLeg(leg, joint, 0)
+    }
+
+    /**
+     * Windmill rover: make a wheel stand perfectly still. Nudge the stop point a little (microseconds) until it stops creeping.
+     */
+    //% block="stop-fix %leg wheel by %micros"
+    //% micros.min=-60 micros.max=60 micros.defl=0
+    //% group="Fix a wheel" weight=4
+    export function fixWheelStop(leg: Leg, micros: number) {
+        if (style != 2 || leg > 3) return
+        wheelTrim[leg] = micros
+        setWheel(leg, 0)
+    }
+
+    /**
+     * Windmill rover: if a wheel turns the wrong way when the robot drives forward, flip it.
+     */
+    //% block="flip spin direction of %leg wheel"
+    //% group="Fix a wheel" weight=3
+    export function flipWheel(leg: Leg) {
+        if (style != 2 || leg > 3) return
+        wheelSigns[leg] = -wheelSigns[leg]
+        setWheel(leg, 0)
+    }
+
+    /**
+     * Windmill rover: spin one wheel forward for a second so you can see which one it is.
+     */
+    //% block="test spin %leg wheel"
+    //% group="Fix a wheel" weight=2
+    export function testWheel(leg: Leg) {
+        if (style != 2 || leg > 3) return
+        if (walker._moving()) stopWalking()
+        setWheel(leg, 0.3)
+        basic.pause(1000)
+        setWheel(leg, 0)
     }
 }

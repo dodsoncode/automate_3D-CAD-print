@@ -1,6 +1,6 @@
 # Walker robot: architecture
 
-A small four-legged walking robot. Every structural part is 3D printed on a Bambu P1S
+A small four-legged walking robot (the "crab"; two other styles, a 6-legged hexapod and a windmill rover with spinning spoked legs, are described in [styles.md](styles.md)). Every structural part is 3D printed on a Bambu P1S
 with the AMS. An ESP32 runs MicroPython and drives 8 hobby servos through a PCA9685
 PWM board. Control is over Wi-Fi from a phone browser, or over USB serial.
 

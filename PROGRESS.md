@@ -101,3 +101,48 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: PR #4 `kid-edition` -> `main` opened (includes the `log-merge-pr3` fix). Not merged; waiting for Jacob.
 - Open for Jacob: TK6-TK9 in TASKS.md (buy BOM, measure parts, open a GUI 3MF in Bambu Studio, print one leg, confirm board I2C address, bench-test levels 0-3).
 - NEXT: Jacob reviews / says merge.
+
+### 2026-10-21 - Styles S1: three locomotion styles planned
+- Request: Jacob finds the robot crab-like; wants other styles, e.g. windmill legs for rough terrain. Chose: wheg rover (4 spoked windmill legs on continuous-rotation servos) and hexapod (6 legs, tripod gait). Scope: full (GUI, firmware, MakeCode).
+- DONE: web-checked FS90R specs; wrote `design/styles.md` (comparison, wheg and hexapod design, unverified list); TASKS.md TS1-TS6 added.
+- Verification: web facts only; nothing built or printed.
+- NEXT: S2 gaits (hexapod tripod + wheg drive) with Python/JS parity tests.
+
+### 2026-10-21 - Styles S2: hexapod tripod gait and wheg drive
+- DONE: `firmware/src/gait.py` + `gui/js/gait.js`: `HexWalker` (tripod gait, 45% swing, three feet always down, no weight shift) and `WhegDrive` (left/right throttle, ramp, simulated hub angle, `wheg_pulse_us` pulse mapping with per-servo stop trim). Hexapod channel order: crab legs keep channels 0-7, middle legs ML 8-9, MR 10-11.
+- Verification: script-checked. Firmware 33 tests pass (6 new); Python vs JS parity < 1e-9 for hexapod poses, wheg speeds and hub angles. Not run on hardware.
+- NEXT: S3 model (style switch, hexapod body, wheg parts, style checks).
+
+### 2026-10-21 - Styles S3: model supports crab, hexapod and windmill rover
+- DONE: `gui/js/model.js` now takes `style` ('crab' | 'hex' | 'wheg'): hexapod = 6 legs with the middle motors beside the bays (body about 124 x 175 mm), tripod gait stability sampling, style-specific check wording; `gui/js/wheg.js` = windmill rover (floor + two motor walls, 4 identical hub-and-spoke legs with tip pads, closed shells, checks: wall thickness, spokes never touch, belly clearance, tip-over angle, climbing torque, spoke stress, pad size, speed, bed fit). Presets per style; `styleDefaults(style)`.
+- DONE: fixed a foot-geometry exception found by the new random sweep (a too-small foot made the pocket cross the disc; geometry now stays valid and the red check explains).
+- Tests: `gui/tests/test_model.py` (6) + `fuzz_model.js`: 300 random designs per style, all shells closed with positive volume, defaults of every style all green, hexapod/wheg behaviours (tripod margin > 12 mm, middle motors outside the bays, overlong spokes flagged, torque rises with a heavy battery, old saved designs load as crab). Exported 3MFs of each style pass `cad/validate_3mf.py`.
+- Finding: the 135 g AA pack is too heavy for FS90R whegs (model says torque is short), so the rover defaults to the 4xAAA holder; hexapod default uses a shorter lower leg (45 mm) for the same reason. Modelled only, not measured.
+- Verification: script-checked only.
+- NEXT: S4 designer UI (style picker, previews, per-style sliders).
+
+### 2026-10-21 - Styles S4: Walker Designer supports all three styles
+- DONE: `gui/index.html` rewritten around a style picker; the panel, tabs, sliders, colour slots, parts page and finish page are built per style (kid wording: Windmill legs / Driving for the rover). Hexapod previews with the tripod gait, rover spins its four hubs and rests the body on the highest wheel, floor grid scrolls with the motion. Designs are saved per style (localStorage, try/catch) and old crab saves still load. Rebuilt `walker-designer.html` and `dist/artifact-fragment.html`; README updated.
+- DONE: fixed two bugs found by the new tests: stale controller after a style switch (crash in the frame loop) and the plate picker showing in robot view.
+- Tests: `gui/tests/test_gui.py` now 13 browser tests: each style loads all green, exports a zip whose 3MFs pass `cad/validate_3mf.py`, hexapod feet on the floor, wheg spin direction and ground contact, separate designs per style, no sideways scroll on a phone for each style.
+- Verification: script-checked and desktop-browser-tested (headless Chromium). NOT tested on a tablet, in Bambu Studio, or on hardware. Artifact not republished yet.
+- NEXT: republish the artifact, commit, then S5 firmware + MakeCode.
+
+### 2026-10-21 - Styles S5a: firmware supports hexapod and windmill rover
+- DONE: `firmware/src/drive.py` (new): `make_rig(config, driver)` builds the right controller for `config.STYLE` with one interface (command / stop / stand / relax / update / moving); `main.py` now runs through it, so the web remote works unchanged for all styles. `config.py`: `STYLE`, hexapod channels (crab 0-7 unchanged, middle legs 8-11) and signs, wheg channels 0-3, signs, per-servo stop trim in `calib.json`, `WHEG_MAX_THROTTLE` 0.4. `calibrate.py`: `wheg_stop / wheg_jog / wheg_test / wheg_flip`. `deploy.sh` copies `drive.py`.
+- Tests: firmware suite 39 pass (6 new): hexapod channel map complete and crab wiring unchanged, hex rig walks within pulse limits, crab rig identical to the plain walker, wheg stop pulse = 1500 us + trim exactly, mirrored right side, throttle cap, ramp to stop, calibration save/load.
+- Verification: script-checked only (fake driver). `main.py` compiles but cannot run off the board. Not run on real servos.
+- NEXT: S5b MakeCode blocks for the new styles.
+
+### 2026-10-21 - Styles S5b: MakeCode blocks for hexapod and windmill rover
+- DONE: `makecode-kid/gait.ts` + `walker.ts`: new `Style` enum and block **start walker as** (crab / hexapod / windmill rover; plain **start walker** = crab as before), `Leg` enum gains middle-left / middle-right (channels 8-11), hexapod tripod gait, wheg drive with **top speed**, and wheel fix blocks (**stop-fix wheel by**, **flip spin direction of wheel**, **test spin wheel**). Blocks for a leg that the chosen robot does not have do nothing. `dist/custom.ts` rebuilt, README and new `lessons/level5-other-robots.md`.
+- Tests: `makecode-kid/tests` now 13 pass (6 new): TS hexapod gait and wheg drive equal the Python versions to 1e-9 (angles with wrap), wheg pulse equals `wheg_pulse_us`, hexapod stand drives 12 channels, crab still 8, rover stand = stop pulse on channels 0-3 and the trim shifts it.
+- Verification: script-checked only. NOT loaded into the MakeCode editor (block text such as the new enum labels is unverified) and not run on hardware.
+- NEXT: S6 docs and PR.
+
+### 2026-10-21 - Styles S6: docs, hermetic tests, PR
+- DONE: `design/README.md` and `PLAN.md` point to `design/styles.md`. `gui/tests/test_model.py` no longer needs `three` installed (uses the vendored copy), so the whole suite runs from a clean checkout.
+- Final run: firmware 39, gait parity + model + browser 25, MakeCode 13 - all pass (firmware 39 + 38 others).
+- Verification overall: script-checked and desktop-browser-tested only. NOT done: open any style's 3MF in Bambu Studio (T1.1), print and fit-test a wheg or hex leg, run on real servos/micro:bit, MakeCode editor import, tablet check.
+- Open for Jacob: TS6 (buy 4 FS90R, 4 more MG90S for the hexapod; trim each FS90R stop; print one windmill leg) plus the older TK6-TK9 and T1.1. PR #5 (log of PR #4) is still unmerged.
+- NEXT: Jacob reviews the styles PR.

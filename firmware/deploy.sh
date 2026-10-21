@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/src"
 PORT="${PORT:-auto}"
 args=()
-for f in config.py pca9685.py servos.py gait.py webctl.py calibrate.py main.py; do
+for f in config.py pca9685.py servos.py gait.py drive.py webctl.py calibrate.py main.py; do
   args+=("cp" "$f" ":$f" "+")
 done
 unset 'args[${#args[@]}-1]'    # drop the trailing "+"
