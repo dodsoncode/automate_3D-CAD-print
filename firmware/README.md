@@ -1,18 +1,29 @@
 # Firmware (ESP32 + MicroPython)
 
-Runs the 4-legged walker described in [../design/](../design/README.md): ESP32 -> I2C -> PCA9685 -> 8 servos.
+Runs the walker (three styles, see below) described in [../design/](../design/README.md): ESP32 -> I2C -> PCA9685 -> 8 servos.
 
 ```
 src/config.py     pins, channel map, limits, gait defaults, Wi-Fi AP, battery thresholds
 src/pca9685.py    I2C PWM driver
 src/servos.py     joint angle (relative to neutral) -> pulse width, sign/offset/limits
-src/gait.py       creep gait, pure math (no hardware imports)
+src/gait.py       creep gait, hexapod tripod gait, wheg drive; pure math (no hardware imports)
+src/drive.py      picks the controller for `config.STYLE` (crab, hex, wheg); pure Python, tested on a PC
 src/webctl.py     Wi-Fi access point + phone web remote
 src/main.py       boots on power-up: Wi-Fi AP, web remote, 50 Hz gait loop, battery cutoff
 src/calibrate.py  REPL helper to center, trim, reverse and save servo settings
 tests/            desktop pytest suite (fake PCA9685; no hardware needed)
 deploy.sh         copy src/ to the board with mpremote
 ```
+
+## Robot styles (`config.STYLE`)
+
+| Style | Hardware | Channels (PCA9685) | Notes |
+|---|---|---|---|
+| `"crab"` (default) | 8 MG90S, 4 legs | 0-7 (leg x 2 + joint) | creep gait with weight shift |
+| `"hex"` | 12 MG90S, 6 legs | crab 0-7, middle-left 8-9, middle-right 10-11 | tripod gait, no leaning needed |
+| `"wheg"` | 4 FS90R continuous-rotation servos | FL 0, FR 1, RL 2, RR 3 | windmill legs; `WHEG_MAX_THROTTLE` caps speed |
+
+The Walker Designer's Finish page prints the `STYLE = ...` line to paste. The web remote buttons are the same for all styles. For the rover, set each servo's stop point first: `calibrate.wheg_stop()`, then turn the servo's trim screw (or `wheg_jog`) until the hub is still, then `wheg_test("FL")` for direction and `save()`. All of this is script-checked with a fake servo driver only; nothing has run on real servos.
 
 ## One-time setup
 

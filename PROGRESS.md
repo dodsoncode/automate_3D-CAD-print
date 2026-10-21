@@ -127,3 +127,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests: `gui/tests/test_gui.py` now 13 browser tests: each style loads all green, exports a zip whose 3MFs pass `cad/validate_3mf.py`, hexapod feet on the floor, wheg spin direction and ground contact, separate designs per style, no sideways scroll on a phone for each style.
 - Verification: script-checked and desktop-browser-tested (headless Chromium). NOT tested on a tablet, in Bambu Studio, or on hardware. Artifact not republished yet.
 - NEXT: republish the artifact, commit, then S5 firmware + MakeCode.
+
+### 2026-10-21 - Styles S5a: firmware supports hexapod and windmill rover
+- DONE: `firmware/src/drive.py` (new): `make_rig(config, driver)` builds the right controller for `config.STYLE` with one interface (command / stop / stand / relax / update / moving); `main.py` now runs through it, so the web remote works unchanged for all styles. `config.py`: `STYLE`, hexapod channels (crab 0-7 unchanged, middle legs 8-11) and signs, wheg channels 0-3, signs, per-servo stop trim in `calib.json`, `WHEG_MAX_THROTTLE` 0.4. `calibrate.py`: `wheg_stop / wheg_jog / wheg_test / wheg_flip`. `deploy.sh` copies `drive.py`.
+- Tests: firmware suite 39 pass (6 new): hexapod channel map complete and crab wiring unchanged, hex rig walks within pulse limits, crab rig identical to the plain walker, wheg stop pulse = 1500 us + trim exactly, mirrored right side, throttle cap, ramp to stop, calibration save/load.
+- Verification: script-checked only (fake driver). `main.py` compiles but cannot run off the board. Not run on real servos.
+- NEXT: S5b MakeCode blocks for the new styles.

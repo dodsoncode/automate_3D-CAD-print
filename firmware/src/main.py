@@ -11,9 +11,8 @@ import time
 from machine import ADC, I2C, Pin
 
 import config
-from gait import Walker, stand_pose
+from drive import make_rig
 from pca9685 import PCA9685
-from servos import Servos
 
 
 class Robot:
@@ -22,11 +21,7 @@ class Robot:
         if config.PCA_ADDR not in i2c.scan():
             raise OSError("PCA9685 not found on I2C - check SDA/SCL/3V3/GND wiring")
         pca = PCA9685(i2c, config.PCA_ADDR, config.SERVO_FREQ, config.PCA_OSC_HZ)
-        signs, offsets = config.load_calib()
-        self.servos = Servos(pca, config.CHANNELS, signs, offsets, config.LIMITS,
-                             config.SERVO_US_MIN, config.SERVO_US_MAX, config.SERVO_RANGE_DEG)
-        self.walker = Walker(config.GAIT_STRIDE_DEG, config.GAIT_LIFT_DEG, config.GAIT_PERIOD_S,
-                             sway_deg=config.GAIT_SWAY_DEG, splay_deg=config.GAIT_SPLAY_DEG)
+        self.rig = make_rig(config, pca)
         self.adc = ADC(Pin(config.BATT_PIN))
         self.adc.atten(ADC.ATTN_11DB)
         self.led = Pin(config.STATUS_LED, Pin.OUT)
@@ -43,22 +38,18 @@ class Robot:
             return
         if cmd in self.MOVES:
             if self.mode == "relaxed":
-                self.servos.apply(stand_pose())
-            self.walker.command(*self.MOVES[cmd])
+                self.rig.stand()
+            self.rig.command(*self.MOVES[cmd])
             self.mode = cmd
         elif cmd == "stop":
-            self.walker.stop()
+            self.rig.stop()
             if self.mode != "relaxed":
                 self.mode = "stopping"
         elif cmd == "stand":
-            self.walker.stop()
-            self.servos.apply(stand_pose())
+            self.rig.stand()
             self.mode = "standing"
         elif cmd == "relax":
-            self.walker.stop()
-            self.walker.scale = {"L": 0.0, "R": 0.0}
-            self.walker.lift_scale = 0.0
-            self.servos.relax()
+            self.rig.relax()
             self.mode = "relaxed"
 
     def status(self):
@@ -73,11 +64,10 @@ class Robot:
             dt = time.ticks_diff(now, last) / 1000
             last = now
             if self.mode != "relaxed":
-                pose = self.walker.update(dt)
-                if self.walker.moving or self.mode not in ("standing", "stopping"):
-                    self.servos.apply(pose)
+                if self.rig.moving or self.mode not in ("standing", "stopping"):
+                    self.rig.update(dt)
                 elif self.mode == "stopping":
-                    self.servos.apply(pose)
+                    self.rig.update(dt)
                     self.mode = "standing"
             await asyncio.sleep_ms(period_ms)
 
@@ -102,7 +92,7 @@ class Robot:
     async def led_loop(self):
         while True:
             self.led.value(not self.led.value())
-            await asyncio.sleep_ms(100 if self.lowbatt else 250 if self.walker.moving else 1000)
+            await asyncio.sleep_ms(100 if self.lowbatt else 250 if self.rig.moving else 1000)
 
 
 async def run():

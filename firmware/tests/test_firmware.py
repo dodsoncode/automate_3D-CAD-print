@@ -353,3 +353,96 @@ def test_wheg_pulse_range_and_trim():
     assert gait.wheg_pulse_us(1.0) == 2000 and gait.wheg_pulse_us(-1.0) == 1000
     assert gait.wheg_pulse_us(5.0) == 2000                  # clamped
     assert gait.wheg_pulse_us(0.0, trim_us=-20) == 1480     # per-servo stop trim
+
+
+# ---------------- styles: drive.make_rig ----------------
+class Cfg:
+    """config module copy with another STYLE."""
+    def __init__(self, style):
+        self.__dict__.update({k: getattr(config, k) for k in dir(config) if not k.startswith("__")})
+        self.STYLE = style
+        self.load_wheg_trim = lambda: dict(config.WHEG_TRIM_US)
+        self.load_wheg_signs = lambda: dict(config.WHEG_SIGNS)
+        self.load_calib = lambda style=None, _s=style: config.load_calib("/nonexistent.json", style=_s)
+
+
+def test_hex_channels_unique_and_complete():
+    ch, signs, offs = config.style_tables("hex")
+    assert sorted(ch.values()) == list(range(12))
+    assert set(ch) == {l + "_" + j for l in config.HEX_LEGS for j in config.JOINTS} == set(signs) == set(offs)
+    assert {k: v for k, v in ch.items() if k in config.CHANNELS} == config.CHANNELS      # crab wiring is unchanged
+    assert config.style_tables("crab")[0] == config.CHANNELS
+
+
+def test_hex_rig_walks_and_mirrors_middle_legs():
+    import drive
+    d = FakeDriver()
+    rig = drive.make_rig(Cfg("hex"), d)
+    rig.stand()
+    assert sorted(d.us) == list(range(12)) and all(abs(v - 1500) < 1e-6 for v in d.us.values())
+    rig.command(1, 0)
+    seen = set()
+    for _ in range(300):
+        rig.update(0.02)
+        assert all(500 <= v <= 2500 for v in d.us.values())
+        seen.add(round(d.us[8]))
+    assert len(seen) > 20 and rig.moving                       # the middle-left hip really sweeps
+    # middle legs mirror like the front legs: left = -1, right = +1 hip sign
+    assert config.HEX_SIGNS["ML_hip"] == config.SIGNS["FL_hip"] and config.HEX_SIGNS["MR_hip"] == config.SIGNS["FR_hip"]
+    rig.relax()
+    assert d.offed == set(range(12))
+
+
+def test_crab_rig_matches_plain_walker():
+    import drive
+    d = FakeDriver()
+    rig = drive.make_rig(Cfg("crab"), d)
+    rig.command(1, 0)
+    w = Walker(config.GAIT_STRIDE_DEG, config.GAIT_LIFT_DEG, config.GAIT_PERIOD_S, sway_deg=config.GAIT_SWAY_DEG, splay_deg=config.GAIT_SPLAY_DEG)
+    w.command(1, 0)
+    s, d2 = make_servos()
+    for _ in range(200):
+        rig.update(0.02)
+        s.apply(w.update(0.02))
+    assert d.us == d2.us
+
+
+def test_wheg_rig_stop_pulses_trim_and_direction():
+    import drive
+    d = FakeDriver()
+    trims = {"FL": 12.0, "FR": -7.0, "RL": 0.0, "RR": 0.0}
+    rig = drive.make_rig(Cfg("wheg"), d, trims=trims)
+    rig.stand()
+    assert d.us == {0: 1512.0, 1: 1493.0, 2: 1500.0, 3: 1500.0}          # still = stop pulse + trim exactly
+    rig.command(1, 0)
+    for _ in range(200):
+        rig.update(0.02)
+    top = config.WHEG_MAX_THROTTLE * config.WHEG_SPAN_US
+    assert d.us[0] == pytest.approx(1512 + top) and d.us[1] == pytest.approx(1493 - top)   # right servo mirrored
+    rig.command(0, 1)                                                      # spin left on the spot
+    for _ in range(300):
+        rig.update(0.02)
+    assert d.us[0] < 1512 and d.us[2] < 1500 and d.us[1] < 1493 and d.us[3] < 1500       # FL/RL back, FR/RR (mirrored) also below stop -> forward
+    rig.stop()
+    for _ in range(300):
+        rig.update(0.02)
+    assert not rig.moving and d.us == {0: 1512.0, 1: 1493.0, 2: 1500.0, 3: 1500.0}
+    rig.relax()
+    assert d.offed == {0, 1, 2, 3}
+
+
+def test_wheg_throttle_never_exceeds_max():
+    import drive
+    d = FakeDriver()
+    rig = drive.make_rig(Cfg("wheg"), d, trims={k: 0.0 for k in config.LEGS})
+    rig.command(5, 5)
+    for _ in range(300):
+        rig.update(0.02)
+        assert all(abs(v - 1500) <= config.WHEG_MAX_THROTTLE * config.WHEG_SPAN_US + 1e-6 for v in d.us.values())
+
+
+def test_calib_roundtrip_with_wheg(tmp_path):
+    p = str(tmp_path / "c.json")
+    config.save_calib(dict(config.SIGNS), dict(config.OFFSETS), p, wheg_signs={"FL": -1, "FR": -1, "RL": 1, "RR": -1}, wheg_trim_us={"FL": 9.0, "FR": 0.0, "RL": 0.0, "RR": 0.0})
+    assert config.load_wheg_trim(p)["FL"] == 9.0 and config.load_wheg_signs(p)["FL"] == -1
+    assert config.load_wheg_trim("/nonexistent.json") == config.WHEG_TRIM_US
