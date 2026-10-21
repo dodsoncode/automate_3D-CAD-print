@@ -1,7 +1,7 @@
 {
     "name": "walker",
     "version": "0.1.0",
-    "description": "Blocks for a 4-legged, 8-servo walking robot on a micro:bit with a PCA9685 servo board (Kitronik Compact 16 Servo Driver)",
+    "description": "Blocks for a crab (8 servos), hexapod (12 servos) or windmill rover (4 continuous servos) walker on a micro:bit with a PCA9685 servo board (Kitronik Compact 16 Servo Driver)",
     "dependencies": {
         "core": "*"
     },

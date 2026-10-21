@@ -133,3 +133,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests: firmware suite 39 pass (6 new): hexapod channel map complete and crab wiring unchanged, hex rig walks within pulse limits, crab rig identical to the plain walker, wheg stop pulse = 1500 us + trim exactly, mirrored right side, throttle cap, ramp to stop, calibration save/load.
 - Verification: script-checked only (fake driver). `main.py` compiles but cannot run off the board. Not run on real servos.
 - NEXT: S5b MakeCode blocks for the new styles.
+
+### 2026-10-21 - Styles S5b: MakeCode blocks for hexapod and windmill rover
+- DONE: `makecode-kid/gait.ts` + `walker.ts`: new `Style` enum and block **start walker as** (crab / hexapod / windmill rover; plain **start walker** = crab as before), `Leg` enum gains middle-left / middle-right (channels 8-11), hexapod tripod gait, wheg drive with **top speed**, and wheel fix blocks (**stop-fix wheel by**, **flip spin direction of wheel**, **test spin wheel**). Blocks for a leg that the chosen robot does not have do nothing. `dist/custom.ts` rebuilt, README and new `lessons/level5-other-robots.md`.
+- Tests: `makecode-kid/tests` now 13 pass (6 new): TS hexapod gait and wheg drive equal the Python versions to 1e-9 (angles with wrap), wheg pulse equals `wheg_pulse_us`, hexapod stand drives 12 channels, crab still 8, rover stand = stop pulse on channels 0-3 and the trim shifts it.
+- Verification: script-checked only. NOT loaded into the MakeCode editor (block text such as the new enum labels is unverified) and not run on hardware.
+- NEXT: S6 docs and PR.

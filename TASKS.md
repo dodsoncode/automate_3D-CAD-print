@@ -90,5 +90,5 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] TS2 Hexapod tripod gait + wheg drive in `firmware/src/gait.py` and `gui/js/gait.js`, parity tested
 - [x] TS3 `gui/js/model.js` + `wheg.js`: style switch, hexapod body/legs, wheg parts, style checks, closed shells
 - [x] TS4 Walker Designer: style picker, per-style preview/animation/sliders/export; rebuild and republish
-- [ ] TS5 Firmware + MakeCode support for hexapod and wheg rover, tests
+- [x] TS5 Firmware + MakeCode support for hexapod and wheg rover, tests
 - [ ] TS6 (J) Buy 4 FS90R (and 4 more MG90S for hexapod); trim each FS90R to stop at 1500 us; print one wheg and test fit

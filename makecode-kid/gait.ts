@@ -28,8 +28,19 @@ namespace walker {
     let scaleL = 0
     let scaleR = 0
     let liftScale = 0
-    let hipOut = [0, 0, 0, 0]
-    let kneeOut = [0, 0, 0, 0]
+    let hipOut = [0, 0, 0, 0, 0, 0]
+    let kneeOut = [0, 0, 0, 0, 0, 0]
+
+    // ---- which robot: 0 crab (4 legs), 1 hexapod (6 legs), 2 windmill rover (4 spinning legs) ----
+    // Hexapod legs: 0 FL, 1 FR, 2 RL, 3 RR, 4 ML, 5 MR (same order as firmware/src/gait.py HEX_LEGS).
+    const HEX_SWING_FRAC = 0.45
+    const HEX_SIDE = [0, 1, 0, 1, 0, 1]
+    const HEX_GROUP = [0, 1, 0, 1, 1, 0]   // two tripods: FL+MR+RL step, then FR+ML+RR
+    let style = 0
+    let throttle = 0.4
+    let rpmFull = 110
+    let whegSpeed = [0, 0, 0, 0]
+    let whegAngle = [0, 0, 0, 0]
 
     function mod1(x: number): number {
         return x - Math.floor(x)
@@ -74,6 +85,34 @@ namespace walker {
         return Math.abs(scaleL) > 0.001 || Math.abs(scaleR) > 0.001 || liftScale > 0.001
     }
 
+    function hexPhase(c: number, leg: number): number {
+        return mod1(c - 0.5 * HEX_GROUP[leg])
+    }
+
+    //% blockHidden=true
+    export function _setStyle(s: number) {
+        style = s
+    }
+    //% blockHidden=true
+    export function _configureWheg(maxThrottle: number, rpm: number, rampPerS: number) {
+        throttle = maxThrottle
+        rpmFull = rpm
+        ramp = rampPerS
+    }
+    //% blockHidden=true
+    export function _whegSpeed(leg: number): number {
+        return whegSpeed[leg]
+    }
+    //% blockHidden=true
+    export function _whegAngle(leg: number): number {
+        return whegAngle[leg]
+    }
+    // continuous-rotation servo pulse (microseconds): stop + trim + sign * speed * 500
+    //% blockHidden=true
+    export function _whegPulse(speed: number, sign: number, trimUs: number): number {
+        return 1500 + trimUs + sign * clamp1(speed) * 500
+    }
+
     //% blockHidden=true
     export function _configure(strideDeg: number, liftDeg: number, periodS: number, rampPerS: number, swayDeg: number, splayDeg: number) {
         stride = strideDeg
@@ -96,6 +135,10 @@ namespace walker {
         scaleL = 0
         scaleR = 0
         liftScale = 0
+        for (let i = 0; i < 4; i++) {
+            whegSpeed[i] = 0
+            whegAngle[i] = 0
+        }
     }
     //% blockHidden=true
     export function _moving(): boolean {
@@ -107,8 +150,32 @@ namespace walker {
         scaleL = approach(scaleL, targetL, step)
         scaleR = approach(scaleR, targetR, step)
         let want = (Math.abs(targetL) > 0.001 || Math.abs(targetR) > 0.001) ? 1 : 0
+        if (style == 2) {
+            for (let leg = 0; leg < 4; leg++) {
+                whegSpeed[leg] = (SIDE[leg] == 0 ? scaleL : scaleR) * throttle
+                whegAngle[leg] = mod1((whegAngle[leg] + whegSpeed[leg] * rpmFull * 6 * dt) / 360) * 360
+            }
+            return
+        }
         liftScale = approach(liftScale, want, step)
         if (isMoving()) cycle = mod1(cycle + dt / period)
+        if (style == 1) {
+            for (let leg = 0; leg < 6; leg++) {
+                let ph = hexPhase(cycle, leg)
+                let hf = 0
+                let lf = 0
+                if (ph < HEX_SWING_FRAC) {
+                    let u = ph / HEX_SWING_FRAC
+                    hf = -Math.cos(PI * u)
+                    lf = Math.sin(PI * u)
+                } else {
+                    hf = 1 - 2 * (ph - HEX_SWING_FRAC) / (1 - HEX_SWING_FRAC)
+                }
+                hipOut[leg] = stride * (HEX_SIDE[leg] == 0 ? scaleL : scaleR) * hf
+                kneeOut[leg] = lift * liftScale * lf
+            }
+            return
+        }
         for (let leg = 0; leg < 4; leg++) {
             let phase = legPhase(cycle, leg)
             let hipF = 0
