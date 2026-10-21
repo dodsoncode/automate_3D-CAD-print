@@ -101,3 +101,7 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: PR #4 `kid-edition` -> `main` opened (includes the `log-merge-pr3` fix). Not merged; waiting for Jacob.
 - Open for Jacob: TK6-TK9 in TASKS.md (buy BOM, measure parts, open a GUI 3MF in Bambu Studio, print one leg, confirm board I2C address, bench-test levels 0-3).
 - NEXT: Jacob reviews / says merge.
+
+### 2026-10-21 - Step: merge PR #4
+- DONE: PR #4 (Kid Edition) merged to `main` at Jacob's request.
+- NEXT: Jacob's items TK6-TK9 in TASKS.md (open a GUI 3MF in Bambu Studio, measure parts, print one leg, confirm board I2C address, bench-test levels 0-3).
