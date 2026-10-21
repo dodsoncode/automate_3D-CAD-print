@@ -139,3 +139,120 @@ def stand_pose(height_deg=0.0):
         out[leg + "_hip"] = 0.0
         out[leg + "_knee"] = -height_deg
     return out
+
+
+# ============================================================ hexapod: tripod gait
+HEX_LEGS = ("FL", "FR", "RL", "RR", "ML", "MR")          # channels: leg index * 2 (+1 for the knee)
+HEX_SIDE = {"FL": "L", "ML": "L", "RL": "L", "FR": "R", "MR": "R", "RR": "R"}
+HEX_GROUP = {"FL": 0, "MR": 0, "RL": 0, "FR": 1, "ML": 1, "RR": 1}   # tripod A swings first, tripod B half a cycle later
+HEX_SWING_FRAC = 0.45        # each tripod is in the air 45% of the cycle; all six feet are down for the other 10%
+
+
+def hex_leg_phase(cycle_t, leg):
+    return (cycle_t - 0.5 * HEX_GROUP[leg]) % 1.0
+
+
+def hex_leg_profile(phase):
+    """Same shape as leg_profile() but with the hexapod's longer swing."""
+    if phase < HEX_SWING_FRAC:
+        s = phase / HEX_SWING_FRAC
+        return -math.cos(math.pi * s), math.sin(math.pi * s)
+    s = (phase - HEX_SWING_FRAC) / (1.0 - HEX_SWING_FRAC)
+    return 1.0 - 2.0 * s, 0.0
+
+
+class HexWalker:
+    """Tripod gait for a 6-leg walker. Three feet are always down and the centre of mass sits inside them,
+    so no weight shift is needed. Same command interface as Walker."""
+
+    def __init__(self, stride_deg=20.0, lift_deg=25.0, period_s=1.4, ramp_per_s=2.0):
+        self.stride = stride_deg
+        self.lift = lift_deg
+        self.period = period_s
+        self.ramp = ramp_per_s
+        self.cycle = 0.0
+        self.target = {"L": 0.0, "R": 0.0}
+        self.scale = {"L": 0.0, "R": 0.0}
+        self.lift_scale = 0.0
+
+    def command(self, fwd=0.0, turn=0.0):
+        self.target["L"] = _clamp(fwd - turn)
+        self.target["R"] = _clamp(fwd + turn)
+
+    def stop(self):
+        self.command(0.0, 0.0)
+
+    @property
+    def moving(self):
+        return any(abs(v) > 1e-3 for v in self.scale.values()) or self.lift_scale > 1e-3
+
+    def update(self, dt):
+        step = self.ramp * dt
+        for side in ("L", "R"):
+            self.scale[side] = _approach(self.scale[side], self.target[side], step)
+        want_lift = 1.0 if any(abs(v) > 1e-3 for v in self.target.values()) else 0.0
+        self.lift_scale = _approach(self.lift_scale, want_lift, step)
+        if self.moving:
+            self.cycle = (self.cycle + dt / self.period) % 1.0
+        return self.pose()
+
+    def pose(self):
+        out = {}
+        for leg in HEX_LEGS:
+            hip_f, lift_f = hex_leg_profile(hex_leg_phase(self.cycle, leg))
+            out[leg + "_hip"] = self.stride * self.scale[HEX_SIDE[leg]] * hip_f
+            out[leg + "_knee"] = self.lift * self.lift_scale * lift_f
+        return out
+
+
+def hex_stand_pose(height_deg=0.0):
+    out = {}
+    for leg in HEX_LEGS:
+        out[leg + "_hip"] = 0.0
+        out[leg + "_knee"] = -height_deg
+    return out
+
+
+# ============================================================ wheg rover: continuous-rotation windmill legs
+class WhegDrive:
+    """Four spinning legs. speed per wheg in [-1, 1] (+ = rolls the robot forward), scaled by max_throttle.
+    Left wheels = fwd - turn, right wheels = fwd + turn, so turn=+1 spins left on the spot.
+    angle[leg] is the simulated hub angle in degrees (for previews and tests; the real servo has no feedback)."""
+
+    def __init__(self, max_throttle=0.5, rpm_full=110.0, ramp_per_s=2.0):
+        self.max_throttle = max_throttle
+        self.rpm_full = rpm_full
+        self.ramp = ramp_per_s
+        self.target = {"L": 0.0, "R": 0.0}
+        self.scale = {"L": 0.0, "R": 0.0}
+        self.angle = {leg: 0.0 for leg in LEGS}
+
+    def command(self, fwd=0.0, turn=0.0):
+        self.target["L"] = _clamp(fwd - turn)
+        self.target["R"] = _clamp(fwd + turn)
+
+    def stop(self):
+        self.command(0.0, 0.0)
+
+    @property
+    def moving(self):
+        return any(abs(v) > 1e-3 for v in self.scale.values())
+
+    def speeds(self):
+        return {leg: self.scale[SIDE[leg]] * self.max_throttle for leg in LEGS}
+
+    def update(self, dt):
+        step = self.ramp * dt
+        for side in ("L", "R"):
+            self.scale[side] = _approach(self.scale[side], self.target[side], step)
+        sp = self.speeds()
+        for leg in LEGS:
+            self.angle[leg] = (self.angle[leg] + sp[leg] * self.rpm_full * 6.0 * dt) % 360.0
+        return sp
+
+
+def wheg_pulse_us(speed, sign=1, trim_us=0.0, span_us=500.0, center_us=1500.0):
+    """Continuous-rotation servo pulse for a wheg speed in [-1, 1]. sign flips mirrored servos, trim_us is the
+    per-servo stop point. speed 0 gives exactly the stop pulse."""
+    speed = _clamp(speed)
+    return center_us + trim_us + sign * speed * span_us

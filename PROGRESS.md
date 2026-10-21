@@ -107,3 +107,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: web-checked FS90R specs; wrote `design/styles.md` (comparison, wheg and hexapod design, unverified list); TASKS.md TS1-TS6 added.
 - Verification: web facts only; nothing built or printed.
 - NEXT: S2 gaits (hexapod tripod + wheg drive) with Python/JS parity tests.
+
+### 2026-10-21 - Styles S2: hexapod tripod gait and wheg drive
+- DONE: `firmware/src/gait.py` + `gui/js/gait.js`: `HexWalker` (tripod gait, 45% swing, three feet always down, no weight shift) and `WhegDrive` (left/right throttle, ramp, simulated hub angle, `wheg_pulse_us` pulse mapping with per-servo stop trim). Hexapod channel order: crab legs keep channels 0-7, middle legs ML 8-9, MR 10-11.
+- Verification: script-checked. Firmware 33 tests pass (6 new); Python vs JS parity < 1e-9 for hexapod poses, wheg speeds and hub angles. Not run on hardware.
+- NEXT: S3 model (style switch, hexapod body, wheg parts, style checks).
