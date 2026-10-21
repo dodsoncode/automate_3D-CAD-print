@@ -101,3 +101,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: PR #4 `kid-edition` -> `main` opened (includes the `log-merge-pr3` fix). Not merged; waiting for Jacob.
 - Open for Jacob: TK6-TK9 in TASKS.md (buy BOM, measure parts, open a GUI 3MF in Bambu Studio, print one leg, confirm board I2C address, bench-test levels 0-3).
 - NEXT: Jacob reviews / says merge.
+
+### 2026-10-21 - Styles S1: three locomotion styles planned
+- Request: Jacob finds the robot crab-like; wants other styles, e.g. windmill legs for rough terrain. Chose: wheg rover (4 spoked windmill legs on continuous-rotation servos) and hexapod (6 legs, tripod gait). Scope: full (GUI, firmware, MakeCode).
+- DONE: web-checked FS90R specs; wrote `design/styles.md` (comparison, wheg and hexapod design, unverified list); TASKS.md TS1-TS6 added.
+- Verification: web facts only; nothing built or printed.
+- NEXT: S2 gaits (hexapod tripod + wheg drive) with Python/JS parity tests.
