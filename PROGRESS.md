@@ -120,3 +120,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Finding: the 135 g AA pack is too heavy for FS90R whegs (model says torque is short), so the rover defaults to the 4xAAA holder; hexapod default uses a shorter lower leg (45 mm) for the same reason. Modelled only, not measured.
 - Verification: script-checked only.
 - NEXT: S4 designer UI (style picker, previews, per-style sliders).
+
+### 2026-10-21 - Styles S4: Walker Designer supports all three styles
+- DONE: `gui/index.html` rewritten around a style picker; the panel, tabs, sliders, colour slots, parts page and finish page are built per style (kid wording: Windmill legs / Driving for the rover). Hexapod previews with the tripod gait, rover spins its four hubs and rests the body on the highest wheel, floor grid scrolls with the motion. Designs are saved per style (localStorage, try/catch) and old crab saves still load. Rebuilt `walker-designer.html` and `dist/artifact-fragment.html`; README updated.
+- DONE: fixed two bugs found by the new tests: stale controller after a style switch (crash in the frame loop) and the plate picker showing in robot view.
+- Tests: `gui/tests/test_gui.py` now 13 browser tests: each style loads all green, exports a zip whose 3MFs pass `cad/validate_3mf.py`, hexapod feet on the floor, wheg spin direction and ground contact, separate designs per style, no sideways scroll on a phone for each style.
+- Verification: script-checked and desktop-browser-tested (headless Chromium). NOT tested on a tablet, in Bambu Studio, or on hardware. Artifact not republished yet.
+- NEXT: republish the artifact, commit, then S5 firmware + MakeCode.

@@ -104,13 +104,24 @@
   }
 
   function readme(info) {
-    return ['WALKER DESIGN - print files', '',
+    return ['WALKER DESIGN - print files (' + info.style + ')', '',
       'Open each plate_N.3mf in Bambu Studio (File > Open). Every part already knows which AMS slot (filament) it uses.',
       '',
       'Filament slots:'].concat(info.colors.map(function (c, i) { return '  Slot ' + (i + 1) + ': ' + c; })).concat([
       '', info.plates + ' plate(s), about ' + info.grams + ' g of plastic, about ' + info.hours + ' h of printing.',
       '', 'robot_settings.txt has the walking numbers for the robot code. walker_design.json holds every setting. Open the designer and use "Load design" to change it later.',
       'Not yet test-printed: print ONE leg first and check the servo fits (see design/kid-edition.md).']).join('\n') + '\n';
+  }
+
+  // Numbers for firmware/src/config.py (or the MakeCode blocks), matching what the preview shows
+  function settingsText(p) {
+    var st = p.style || 'crab', lines = ['STYLE = "' + st + '"'];
+    if (st === 'wheg') lines.push('WHEG_MAX_THROTTLE = ' + p.maxThrottle);
+    else {
+      lines.push('GAIT_STRIDE_DEG = ' + p.stride, 'GAIT_LIFT_DEG = ' + p.lift, 'GAIT_PERIOD_S = ' + p.period);
+      if (st === 'crab') lines.push('GAIT_SWAY_DEG = ' + p.sway, 'GAIT_SPLAY_DEG = ' + p.legSplay);
+    }
+    return lines.join('\n') + '\n';
   }
 
   // Returns Promise<Uint8Array> of a zip: plate_1.3mf ..., walker_design.json, README.txt
@@ -128,12 +139,12 @@
     });
     return Promise.all(jobs).then(function () {
       outer.file('walker_design.json', JSON.stringify({ app: 'Walker Designer', version: 1, params: params }, null, 1));
-      outer.file('robot_settings.txt', 'GAIT_STRIDE_DEG = ' + params.stride + '\nGAIT_LIFT_DEG = ' + params.lift + '\nGAIT_PERIOD_S = ' + params.period + '\nGAIT_SWAY_DEG = ' + params.sway + '\nGAIT_SPLAY_DEG = ' + params.legSplay + '\n');
-      outer.file('README.txt', readme({ colors: params.ams.map(function (c) { return c.name; }), plates: plates.length,
+      outer.file('robot_settings.txt', settingsText(params));
+      outer.file('README.txt', readme({ style: (params.style || 'crab'), colors: params.ams.map(function (c) { return c.name; }), plates: plates.length,
         grams: Math.round(an.grams), hours: (an.grams * 2.2 / 60).toFixed(1) }));
       return outer.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     });
   }
 
-  return { plateFiles: plateFiles, buildZip: buildZip, mergeShells: mergeShells };
+  return { plateFiles: plateFiles, buildZip: buildZip, mergeShells: mergeShells, settingsText: settingsText };
 });

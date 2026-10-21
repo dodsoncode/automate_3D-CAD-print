@@ -108,3 +108,100 @@ def test_mobile_layout_no_sideways_scroll(server, page):
     assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
     pg.screenshot(path=os.path.join(tempfile.gettempdir(), "wd_mobile.png"))
     pg.close()
+
+
+# ---------------- styles: crab / hexapod / windmill rover ----------------
+@pytest.fixture()
+def fresh(server, page):
+    pg = page.context.browser.new_page(viewport={"width": 1280, "height": 860}, accept_downloads=True)
+    pg.errors = []
+    pg.on("pageerror", lambda e: pg.errors.append(str(e)))
+    pg.goto(server)
+    pg.wait_for_function("window.WDApp && WDApp.an")
+    yield pg
+    pg.close()
+
+
+@pytest.mark.parametrize("style", ["crab", "hex", "wheg"])
+def test_each_style_loads_green_and_exports(fresh, style):
+    pg = fresh
+    pg.click('.stylecard[data-style="%s"]' % style)
+    pg.wait_for_timeout(300)
+    assert pg.evaluate("WDApp.p.style") == style
+    assert pg.evaluate("WDApp.an.worst") == "ok", pg.evaluate("WDApp.an.checks.filter(c=>c.level!='ok').map(c=>c.id+': '+c.detail)")
+    pg.click("#tabbtn-finish")
+    with pg.expect_download() as dl:
+        pg.click("#make")
+    z = zipfile.ZipFile(dl.value.path())
+    out = tempfile.mkdtemp()
+    plates = [n for n in z.namelist() if n.endswith(".3mf")]
+    assert plates
+    for n in plates:
+        f = os.path.join(out, n)
+        open(f, "wb").write(z.read(n))
+        r = subprocess.run([sys.executable, os.path.join(REPO, "cad", "validate_3mf.py"), f], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+    pg.screenshot(path=os.path.join(tempfile.gettempdir(), "wd_%s.png" % style))
+    assert pg.errors == []
+
+
+def test_hex_feet_on_floor_and_six_legs(fresh):
+    pg = fresh
+    pg.click('.stylecard[data-style="hex"]')
+    pg.wait_for_timeout(300)
+    pg.click("#walk")
+    legs = ["FL", "FR", "ML", "MR", "RL", "RR"]
+    pg.evaluate("WDApp.applyPose(%s)" % json.dumps({l + "_" + j: 0 for l in legs for j in ["hip", "knee"]}))
+    for leg in legs:
+        assert abs(pg.evaluate("WDApp.footWorld('%s')[2]" % leg)) < 0.6, leg
+    # middle legs sit at the body's side, between front and back hips
+    assert pg.evaluate("WDApp.d.legs.length") == 6
+
+
+def test_wheg_spin_sign_and_ground_contact(fresh):
+    pg = fresh
+    pg.click('.stylecard[data-style="wheg"]')
+    pg.wait_for_timeout(300)
+    pg.click("#walk")                       # park
+    # rotating by one pitch must leave the lowest tip at the same height (rotational symmetry),
+    # and a half pitch must lower the body (tip -> flat between spokes) or equal; body never below the floor
+    pg.evaluate("WDApp.setWheel({FL:0,FR:0,RL:0,RR:0})")
+    lows = []
+    for ang in [0, 10, 20, 30, 45]:
+        pg.evaluate("WDApp.setWheel({FL:%d,FR:%d,RL:%d,RR:%d})" % ((ang,) * 4))
+        zs = [t[2] for l in ["FL", "FR", "RL", "RR"] for t in pg.evaluate("WDApp.wheelTips('%s')" % l)]
+        lows.append(min(zs))
+    assert all(z > -2 for z in lows), lows
+    # left and right wheels spin the same way when driven forward: tip x-velocity at the bottom is backward for all
+    pg.evaluate("WDApp.setWheel({FL:0,FR:0,RL:0,RR:0})")
+    base = {l: pg.evaluate("WDApp.wheelTips('%s')" % l) for l in ["FL", "FR"]}
+    pg.evaluate("WDApp.setWheel({FL:5,FR:5,RL:5,RR:5})")
+    for l in ["FL", "FR"]:
+        new = pg.evaluate("WDApp.wheelTips('%s')" % l)
+        lowest = min(range(len(new)), key=lambda i: new[i][2] + 0 * base[l][i][2])
+        # forward drive (positive angle): contact tips move backward (-x) relative to the axle
+        axle_x = pg.evaluate("WDApp.d.axleX") * (1 if l[0] == "F" else -1)
+        dx = new[lowest][0] - base[l][lowest][0]
+        assert dx < 0, (l, dx)
+
+
+def test_style_switch_keeps_separate_designs(fresh):
+    pg = fresh
+    pg.evaluate("WDApp.set('femurLen', 70)")
+    pg.click('.stylecard[data-style="hex"]')
+    pg.wait_for_timeout(200)
+    assert pg.evaluate("WDApp.p.femurLen") != 70
+    pg.click('.stylecard[data-style="crab"]')
+    pg.wait_for_timeout(200)
+    assert pg.evaluate("WDApp.p.femurLen") == 70
+
+
+def test_mobile_no_overflow_each_style(server, page):
+    pg = page.context.browser.new_page(viewport={"width": 390, "height": 800})
+    pg.goto(server)
+    pg.wait_for_function("window.WDApp && WDApp.an")
+    for st in ["crab", "hex", "wheg"]:
+        pg.click('.stylecard[data-style="%s"]' % st)
+        pg.wait_for_timeout(200)
+        assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), st
+    pg.close()

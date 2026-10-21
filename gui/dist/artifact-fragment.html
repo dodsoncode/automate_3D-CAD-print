@@ -66,8 +66,15 @@ header.top { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center
 .chip:hover { border-color: var(--sky); }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 
+.styles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.stylecard { text-align: left; display: grid; gap: 2px; background: var(--surface); border: 2px solid var(--line); border-radius: 14px; padding: 10px 14px; min-width: 0; }
+.stylecard b { font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; }
+.stylecard .sub { font-family: var(--font-mono); font-size: 0.78rem; color: var(--sky); }
+.stylecard .blurb { font-size: 0.88rem; color: var(--muted); }
+.stylecard:hover { border-color: var(--sky); }
+.stylecard[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .main { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.9fr); gap: 16px; align-items: start; }
-.stage { position: sticky; top: 10px; background: var(--view-bg); border: 2px solid var(--line); border-radius: 18px; overflow: hidden; height: calc(100vh - 120px); min-height: 380px; max-height: 760px; }
+.stage { position: sticky; top: 10px; background: var(--view-bg); border: 2px solid var(--line); border-radius: 18px; overflow: hidden; height: min(760px, calc(100vh - 20px)); min-height: 380px; }
 #view { position: absolute; inset: 0; }
 #view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .stage .bar { position: absolute; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; }
@@ -154,6 +161,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     </div>
     <div class="presets" id="presets"><span class="lbl">Start from</span></div>
   </header>
+  <div class="styles" id="styles" role="radiogroup" aria-label="Robot style"></div>
 
   <div class="main">
     <div class="stage" id="stage">
@@ -181,12 +189,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
 
     <div class="panel">
       <div class="tabs" role="tablist" id="tabs"></div>
-      <section class="tab" id="tab-shape" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-legs" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-walk" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-colors" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-parts" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-finish" role="tabpanel" hidden></section>
+      <div id="secs"></div>
     </div>
   </div>
 </div>
@@ -1373,8 +1376,95 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return out;
   }
 
+  // ============================================================ hexapod: tripod gait
+  var HEX_LEGS = ['FL', 'FR', 'RL', 'RR', 'ML', 'MR'];
+  var HEX_SIDE = { FL: 'L', ML: 'L', RL: 'L', FR: 'R', MR: 'R', RR: 'R' };
+  var HEX_GROUP = { FL: 0, MR: 0, RL: 0, FR: 1, ML: 1, RR: 1 };
+  var HEX_SWING_FRAC = 0.45;
+  function hexLegPhase(cycleT, leg) { return mod1(cycleT - 0.5 * HEX_GROUP[leg]); }
+  function hexLegProfile(phase) {
+    if (phase < HEX_SWING_FRAC) { var s = phase / HEX_SWING_FRAC; return [-Math.cos(Math.PI * s), Math.sin(Math.PI * s)]; }
+    var s2 = (phase - HEX_SWING_FRAC) / (1.0 - HEX_SWING_FRAC);
+    return [1.0 - 2.0 * s2, 0.0];
+  }
+  function HexWalker(strideDeg, liftDeg, periodS, rampPerS) {
+    this.stride = strideDeg === undefined ? 20.0 : strideDeg;
+    this.lift = liftDeg === undefined ? 25.0 : liftDeg;
+    this.period = periodS === undefined ? 1.4 : periodS;
+    this.ramp = rampPerS === undefined ? 2.0 : rampPerS;
+    this.cycle = 0.0;
+    this.target = { L: 0.0, R: 0.0 };
+    this.scale = { L: 0.0, R: 0.0 };
+    this.liftScale = 0.0;
+  }
+  HexWalker.prototype.command = function (fwd, turn) {
+    fwd = fwd || 0; turn = turn || 0; this.target.L = clamp(fwd - turn); this.target.R = clamp(fwd + turn);
+  };
+  HexWalker.prototype.stop = function () { this.command(0, 0); };
+  HexWalker.prototype.isMoving = function () {
+    return Math.abs(this.scale.L) > 1e-3 || Math.abs(this.scale.R) > 1e-3 || this.liftScale > 1e-3;
+  };
+  HexWalker.prototype.update = function (dt) {
+    var step = this.ramp * dt;
+    this.scale.L = approach(this.scale.L, this.target.L, step);
+    this.scale.R = approach(this.scale.R, this.target.R, step);
+    var want = (Math.abs(this.target.L) > 1e-3 || Math.abs(this.target.R) > 1e-3) ? 1.0 : 0.0;
+    this.liftScale = approach(this.liftScale, want, step);
+    if (this.isMoving()) this.cycle = mod1(this.cycle + dt / this.period);
+    return this.pose();
+  };
+  HexWalker.prototype.pose = function () {
+    var out = {};
+    for (var i = 0; i < HEX_LEGS.length; i++) {
+      var leg = HEX_LEGS[i], pf = hexLegProfile(hexLegPhase(this.cycle, leg));
+      out[leg + '_hip'] = this.stride * this.scale[HEX_SIDE[leg]] * pf[0];
+      out[leg + '_knee'] = this.lift * this.liftScale * pf[1];
+    }
+    return out;
+  };
+  function hexStandPose(heightDeg) {
+    heightDeg = heightDeg || 0; var out = {};
+    for (var i = 0; i < HEX_LEGS.length; i++) { out[HEX_LEGS[i] + '_hip'] = 0.0; out[HEX_LEGS[i] + '_knee'] = -heightDeg; }
+    return out;
+  }
+
+  // ============================================================ wheg rover: continuous-rotation windmill legs
+  function WhegDrive(maxThrottle, rpmFull, rampPerS) {
+    this.maxThrottle = maxThrottle === undefined ? 0.5 : maxThrottle;
+    this.rpmFull = rpmFull === undefined ? 110.0 : rpmFull;
+    this.ramp = rampPerS === undefined ? 2.0 : rampPerS;
+    this.target = { L: 0.0, R: 0.0 };
+    this.scale = { L: 0.0, R: 0.0 };
+    this.angle = { FL: 0.0, FR: 0.0, RL: 0.0, RR: 0.0 };
+  }
+  WhegDrive.prototype.command = function (fwd, turn) {
+    fwd = fwd || 0; turn = turn || 0; this.target.L = clamp(fwd - turn); this.target.R = clamp(fwd + turn);
+  };
+  WhegDrive.prototype.stop = function () { this.command(0, 0); };
+  WhegDrive.prototype.isMoving = function () { return Math.abs(this.scale.L) > 1e-3 || Math.abs(this.scale.R) > 1e-3; };
+  WhegDrive.prototype.speeds = function () {
+    var out = {};
+    for (var i = 0; i < LEGS.length; i++) out[LEGS[i]] = this.scale[SIDE[LEGS[i]]] * this.maxThrottle;
+    return out;
+  };
+  WhegDrive.prototype.update = function (dt) {
+    var step = this.ramp * dt;
+    this.scale.L = approach(this.scale.L, this.target.L, step);
+    this.scale.R = approach(this.scale.R, this.target.R, step);
+    var sp = this.speeds();
+    for (var i = 0; i < LEGS.length; i++) this.angle[LEGS[i]] = mod1((this.angle[LEGS[i]] + sp[LEGS[i]] * this.rpmFull * 6.0 * dt) / 360.0) * 360.0;
+    return sp;
+  };
+  function whegPulseUs(speed, sign, trimUs, spanUs, centerUs) {
+    sign = sign === undefined ? 1 : sign; trimUs = trimUs || 0; spanUs = spanUs === undefined ? 500 : spanUs; centerUs = centerUs === undefined ? 1500 : centerUs;
+    return centerUs + trimUs + sign * clamp(speed) * spanUs;
+  }
+
   return { LEGS: LEGS, SIDE: SIDE, SWING_SLOT: SWING_SLOT, SWING_FRAC: SWING_FRAC, SLOT_SPACING: SLOT_SPACING,
-           legPhase: legPhase, legProfile: legProfile, swayOffset: swayOffset, footTangent: footTangent, Walker: Walker, standPose: standPose };
+           legPhase: legPhase, legProfile: legProfile, swayOffset: swayOffset, footTangent: footTangent, Walker: Walker, standPose: standPose,
+           HEX_LEGS: HEX_LEGS, HEX_SIDE: HEX_SIDE, HEX_GROUP: HEX_GROUP, HEX_SWING_FRAC: HEX_SWING_FRAC,
+           hexLegPhase: hexLegPhase, hexLegProfile: hexLegProfile, HexWalker: HexWalker, hexStandPose: hexStandPose,
+           WhegDrive: WhegDrive, whegPulseUs: whegPulseUs };
 });
 
 </script>
@@ -1631,6 +1721,207 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 });
 
 </script>
+<script>/* js/wheg.js */
+/* Wheg rover ("windmill legs"): 4 spoked legs that spin on continuous-rotation servos.
+ *
+ * Body frame: x forward, y left, z up, z = 0 is the underside of the body floor.
+ * The servos sit in two vertical side walls with their tabs on the INSIDE face and the shaft pointing outward.
+ * Wheel frame (while building): the wheel lies in the X/Y plane and Z is |y| in the body, so the same shells can be
+ * placed on either side with a +-90 degree turn about x. Nothing printed here has been test-printed yet.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./geom.js'));
+  else { root.WD = root.WD || {}; root.WD.wheg = factory(root.WD.geom); }
+})(typeof self !== 'undefined' ? self : this, function (G) {
+  'use strict';
+  var DEG = Math.PI / 180;
+  var LEGS = ['FL', 'FR', 'RL', 'RR'];
+  var SX = { FL: 1, FR: 1, RL: -1, RR: -1 }, SY = { FL: 1, FR: -1, RL: 1, RR: -1 };
+
+  // H: helpers shared with model.js { mk, packPlates, buildTrim, slotFor, DENS }
+  function make(H) {
+    function derive(p) {
+      var s = p.servo, c = p.clearance, d = {};
+      d.legs = LEGS; d.t = p.legThick;
+      d.eL = p.board.L + 2 * c; d.eW = p.board.W + 2 * c;
+      d.bL = p.battery.L + 2 * c; d.bW = p.battery.W + 2 * c;
+      d.divider = 4; d.innerW = d.eW + d.bW + d.divider;
+      d.yE = d.innerW / 2 - d.eW / 2; d.yB = -(d.innerW / 2 - d.bW / 2);
+      d.bayX = Math.max(d.eL, d.bL);
+      d.cutL = s.L + 2 * c; d.cutW = s.W + 2 * c;
+      d.floorT = p.floorT; d.wallT = 3.0;
+      d.hx = d.bayX / 2 + 4 + d.cutL / 2 + p.extraLength / 2;                 // servo body centre (x)
+      d.axleX = d.hx + (s.L / 2 - s.shaftOff);                                 // shaft sits toward the outside
+      d.halfLx = d.hx + s.tabSpan / 2 + 2;
+      d.wallIn = d.innerW / 2 + p.extraWidth / 2; d.wallOut = d.wallIn + d.wallT;
+      d.halfLy = d.wallOut;
+      d.zc = d.floorT + 1.5 + d.cutW / 2;                                      // servo / axle height above the underside
+      d.wallTop = d.zc + d.cutW / 2 + 5;
+      d.axleZ = d.zc;
+      d.outline = G.rect(0, 0, 2 * d.halfLx, 2 * d.halfLy);
+      // wheel
+      d.R = p.spokeLen; d.padD = p.padSize; d.padW = p.padWidth;
+      d.hubR = 15; d.padCenterR = d.R - d.padD / 2;
+      d.hubY0 = d.wallOut + (s.tabFromTop - d.wallT) + s.hornGap + s.hornThick;   // inner face of the hub, as |y|
+      d.hubY1 = d.hubY0 + d.t; d.padY1 = d.hubY0 + Math.max(d.padW, d.t);
+      d.trackHalf = d.hubY0 + (d.padY1 - d.hubY0) / 2;                          // |y| of the ground contact
+      d.n = Math.round(p.spokeCount);
+      d.standH = d.R - d.axleZ;                                                 // underside height with a spoke straight down
+      d.minClear = d.R * Math.cos(Math.PI / d.n) - d.axleZ;                     // lowest it ever gets (two spokes down)
+      d.axleSpacing = 2 * d.axleX;
+      d.pitch = 360 / d.n;
+      return d;
+    }
+
+    function buildBody(p, d) {
+      var s = p.servo, floorHoles = [G.rrect(0, d.yE, d.eL - 14, d.eW - 14, 3, 4)];
+      var floor = G.extrude(G.rect(0, 0, 2 * d.halfLx, 2 * d.halfLy), floorHoles, 0, d.floorT);
+      var shells = [floor];
+      [-1, 1].forEach(function (sy) {
+        var holes = [];
+        [-1, 1].forEach(function (sx) {
+          holes.push(G.rect(sx * d.hx, d.zc, d.cutL, d.cutW));
+          [-1, 1].forEach(function (k) { holes.push(G.circle(sx * d.hx + k * s.holeSpan / 2, d.zc, s.pilot / 2, 14)); });
+        });
+        var wall = G.extrudeUW(G.rect(0, d.wallTop / 2, 2 * d.halfLx, d.wallTop), holes,
+                               sy > 0 ? d.wallIn : -d.wallOut, sy > 0 ? d.wallOut : -d.wallIn);
+        shells.push(wall);
+      });
+      return shells;
+    }
+
+    function buildWheel(p, d) {
+      var s = p.servo, holes = [G.circle(0, 0, s.hub / 2, 28)], spokes = [], i;
+      s.hornHoles.forEach(function (h) { holes.push(G.circle(h, 0, s.pilot / 2, 14)); });
+      var hub = G.extrude(G.circle(0, 0, d.hubR, 48), holes, d.hubY0, d.hubY1);
+      var r0 = d.hubR - 2.0, r1 = d.padCenterR;
+      for (i = 0; i < d.n; i++) {
+        var a = i * d.pitch * DEG, ca = Math.cos(a), sa = Math.sin(a);
+        spokes.push(G.extrude(G.stroke([[r0 * ca, r0 * sa], [r1 * ca, r1 * sa]], p.legWidth), [], d.hubY0, d.hubY1));
+      }
+      var pads = [];
+      for (i = 0; i < d.n; i++) {
+        var b = i * d.pitch * DEG;
+        pads.push(G.extrude(G.circle(d.padCenterR * Math.cos(b), d.padCenterR * Math.sin(b), d.padD / 2, 28), [], d.hubY0, d.padY1));
+      }
+      return { wheel: [hub].concat(spokes), pads: pads };
+    }
+
+    function buildParts(p, d) {
+      var w = buildWheel(p, d);
+      return {
+        body: [{ name: 'body', slotKey: 'body', shells: buildBody(p, d) },
+               { name: 'trim', slotKey: 'trim', shells: H.buildTrim(p, d) }],
+        wheg: [{ name: 'hub and spokes', slotKey: 'leg', shells: w.wheel },
+               { name: 'tip pads', slotKey: 'foot', shells: w.pads }]
+      };
+    }
+
+    function printObjects(p, d, parts) {
+      parts = parts || buildParts(p, d);
+      var out = [];
+      function one(kind, name, leg) {
+        var list = parts[kind].map(function (pt) { return { name: pt.name, slot: H.slotFor(p, pt.slotKey, leg), shells: pt.shells.slice() }; });
+        var all = []; list.forEach(function (pt) { all = all.concat(pt.shells); });
+        var bb = G.bbox(all), sh = [-bb.min[0], -bb.min[1], -bb.min[2]];
+        list.forEach(function (pt) { pt.shells = G.transformAll(pt.shells, G.I3, sh); });
+        var vol = 0; list.forEach(function (pt) { pt.shells.forEach(function (s) { vol += G.volume(s); }); });
+        out.push({ name: name, kind: kind, leg: leg || null, parts: list,
+                   size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], volume: vol });
+      }
+      one('body', 'Body');
+      LEGS.forEach(function (l) { one('wheg', 'Windmill leg ' + l, l); });
+      return out;
+    }
+
+    function hardware(p, d) {
+      var s = p.servo, fz = d.floorT, body = [], sx, sy;
+      body.push({ name: 'board', color: '#1f8a4c', size: [p.board.L, p.board.W, p.board.H], center: [0, d.yE, fz + p.board.H / 2] });
+      body.push({ name: 'microbit', color: '#222a33', size: [p.microbit.L, p.microbit.W, p.microbit.H], center: [0, d.yE, fz + p.board.H + p.microbit.H / 2] });
+      body.push({ name: 'battery', color: '#6b7280', size: [p.battery.L, p.battery.W, p.battery.H], center: [0, d.yB, fz + p.battery.H / 2] });
+      for (sx = -1; sx <= 1; sx += 2) for (sy = -1; sy <= 1; sy += 2) {
+        var yc = sy * (d.wallIn + s.tabFromTop - s.H / 2);
+        body.push({ name: 'spinservo', color: '#2b6cb0', size: [s.L, s.H, s.W], center: [sx * d.hx, yc, d.zc] });
+        body.push({ name: 'spintab', color: '#2b6cb0', size: [s.tabSpan, s.tabThick, s.W], center: [sx * d.hx, sy * (d.wallIn + s.tabThick / 2), d.zc] });
+      }
+      return { body: body, leg: [], knee: [] };
+    }
+
+    function masses(p, d, objs) {
+      var m = { body: 0, wheg: 0 };
+      objs.forEach(function (o) { m[o.kind] += o.volume * H.DENS; });
+      var wm = p.wheelServo.mass, parts = [[m.body, 0, 0, d.floorT], [p.board.mass, 0, d.yE, d.floorT + 5],
+        [p.microbit.mass, 0, d.yE, d.floorT + p.board.H + 2], [p.battery.mass, 0, d.yB, d.floorT + p.battery.H / 2]];
+      LEGS.forEach(function (l) {
+        parts.push([wm, SX[l] * d.hx, SY[l] * (d.wallIn + 8), d.zc]);
+        parts.push([m.wheg / 4, SX[l] * d.axleX, SY[l] * (d.hubY0 + 2), d.zc]);
+      });
+      var tm = 0, x = 0, y = 0, z = 0;
+      parts.forEach(function (q) { tm += q[0]; x += q[0] * q[1]; y += q[0] * q[2]; z += q[0] * q[3]; });
+      return { printed: m, total: tm, com: [x / tm, y / tm, z / tm], wheelMass: m.wheg / 4 };
+    }
+
+    function analyze(p, objs) {
+      var d = derive(p), checks = [], s = p.servo, mk = H.mk;
+      objs = objs || printObjects(p, d);
+      var mass = masses(p, d, objs), W = p.wheelServo;
+
+      checks.push(d.wallT <= s.tabFromTop - 0.3 ? mk('floor', 'ok', 'Walls are the right thickness', 'The motor top pokes through the wall so the horn can turn.')
+        : mk('floor', 'bad', 'Wall too thick', 'Walls must be thinner than ' + (s.tabFromTop - 0.3).toFixed(1) + ' mm.'));
+
+      var gap = d.axleSpacing - (2 * d.R + 4);
+      checks.push(gap >= 0 ? mk('wheelgap', 'ok', 'Windmill legs never touch', 'Front and back legs clear each other by at least ' + gap.toFixed(0) + ' mm.')
+        : mk('wheelgap', 'bad', 'Windmill legs would hit each other', 'The spokes are ' + (-gap).toFixed(0) + ' mm too long for the body. Make the body longer or the spokes shorter.'));
+
+      var mc = d.minClear;
+      checks.push(mc >= 10 ? mk('height', 'ok', 'Belly clears the ground', 'At least ' + mc.toFixed(0) + ' mm under the body even when two spokes touch down.')
+        : mc >= 3 ? mk('height', 'warn', 'Belly is low', 'Only ' + mc.toFixed(0) + ' mm under the body at the lowest. Longer spokes or more spokes help.')
+        : mk('height', 'bad', 'Body would drag', 'The body drags when two spokes touch down. Use longer or more spokes.'));
+
+      var comH = d.standH + mass.com[2], track = d.trackHalf;
+      var tip = Math.atan2(track, comH) / DEG;
+      checks.push(tip >= 30 ? mk('stable', 'ok', 'Hard to tip over', 'It tips only when leaned past ' + tip.toFixed(0) + ' degrees sideways.')
+        : tip >= 20 ? mk('stable', 'warn', 'Tips on slopes', 'Leans over at about ' + tip.toFixed(0) + ' degrees sideways. Wider body, lower battery or shorter spokes help.')
+        : mk('stable', 'bad', 'Might tip over', 'Tips at only ' + tip.toFixed(0) + ' degrees sideways. Make the body wider or the spokes shorter.'));
+
+      var arm = 0.7 * d.R / 10;                                              // cm: horizontal reach when a spoke pushes over a step
+      var need = (mass.total / 1000 / 2) * 1.3 * arm, have = W.torque * 0.6;
+      var ratio = have / need;
+      checks.push(ratio >= 1.5 ? mk('muscle', 'ok', 'Motors are strong enough', 'Needs about ' + need.toFixed(2) + ' kg-cm to climb a step, has ' + have.toFixed(2) + '.')
+        : ratio >= 1 ? mk('muscle', 'warn', 'Motors work hard on steps', 'Close to the limit (' + need.toFixed(2) + ' of ' + have.toFixed(2) + ' kg-cm). Shorter spokes or a lighter battery help.')
+        : mk('muscle', 'bad', 'Motors too weak to climb', 'Needs ' + need.toFixed(2) + ' kg-cm but has ' + have.toFixed(2) + '. Use shorter spokes or a lighter battery pack.'));
+
+      var F = mass.total / 1000 * 9.81 / 2 * 1.5, Mb = F * (d.padCenterR), Z = p.legThick * p.legWidth * p.legWidth / 6, sigma = Mb / Z;
+      checks.push(sigma < 6 ? mk('thin', 'ok', 'Spokes are sturdy', 'Bending stress ' + sigma.toFixed(1) + ' MPa (printed plastic breaks near 30+).')
+        : sigma < 12 ? mk('thin', 'warn', 'Spokes are a bit thin', 'Wider or thicker spokes are safer (' + sigma.toFixed(1) + ' MPa).')
+        : mk('thin', 'bad', 'Spokes may snap', 'Make the spokes thicker, wider or shorter (' + sigma.toFixed(1) + ' MPa).'));
+
+      checks.push(d.padD >= p.legWidth + 2 ? mk('foot', 'ok', 'Tip pads are big enough', 'The pad covers the end of the spoke.')
+        : mk('foot', 'bad', 'Tip pad too small', 'Make the pad at least ' + Math.ceil(p.legWidth + 2) + ' mm across.'));
+
+      var speed = W.rpm * p.maxThrottle / 60 * 2 * Math.PI * (0.8 * d.R / 10);   // cm/s, rolling on 0.8 R
+      checks.push(speed <= 25 ? mk('speed', 'ok', 'About ' + speed.toFixed(0) + ' cm per second', 'Top speed at your throttle setting. Going slower is easier to control.')
+        : mk('speed', 'warn', 'Quite fast: ' + speed.toFixed(0) + ' cm per second', 'Fast robots flip over bumps. Lower the throttle first.'));
+
+      var plates = H.packPlates(objs, p.bed), grams = 0;
+      objs.forEach(function (o) { grams += o.volume * H.DENS; });
+      var tooBig = objs.some(function (o) { return o.size[0] > p.bed - 10 || o.size[1] > p.bed - 10; });
+      checks.push(tooBig ? mk('bed', 'bad', 'A part is too big for the printer', 'The body must fit on a ' + p.bed + ' mm bed. Shrink the body.')
+        : mk('bed', 'ok', 'Prints on ' + plates.length + ' plate' + (plates.length > 1 ? 's' : ''),
+             'About ' + grams.toFixed(0) + ' g of plastic, roughly ' + (grams * 2.2 / 60).toFixed(1) + ' hours.'));
+
+      var worst = checks.some(function (c) { return c.level === 'bad'; }) ? 'bad' : checks.some(function (c) { return c.level === 'warn'; }) ? 'warn' : 'ok';
+      return { derived: d, mass: mass, stability: { margin: tip, atPhase: 0, minFootGap: gap }, checks: checks, worst: worst, plates: plates, grams: grams,
+               torque: { need: need, have: have }, stress: sigma, speedCmS: speed };
+    }
+
+    return { derive: derive, buildParts: buildParts, printObjects: printObjects, hardware: hardware, analyze: analyze, LEGS: LEGS, SX: SX, SY: SY };
+  }
+
+  return { make: make, LEGS: LEGS, SX: SX, SY: SY };
+});
+
+</script>
 <script>/* js/model.js */
 /* Walker design model: parameters -> layout -> printable parts -> physical checks.
  *
@@ -1644,16 +1935,19 @@ https://github.com/nodeca/pako/blob/main/LICENSE
  * nothing here has been test-printed yet.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./geom.js'), require('./gait.js'));
-  else { root.WD = root.WD || {}; root.WD.model = factory(root.WD.geom, root.WD.gait); }
-})(typeof self !== 'undefined' ? self : this, function (G, Gait) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./geom.js'), require('./gait.js'), require('./wheg.js'));
+  else { root.WD = root.WD || {}; root.WD.model = factory(root.WD.geom, root.WD.gait, root.WD.wheg); }
+})(typeof self !== 'undefined' ? self : this, function (G, Gait, WhegMod) {
   'use strict';
   var DEG = Math.PI / 180;
   var LEGS = Gait.LEGS;
   var HIP_SIGN = { FL: 1, FR: -1, RL: 1, RR: -1 };          // body corner signs: x = sx*hx, y = sy*hy
-  var HIP_SY = { FL: 1, FR: -1, RL: 1, RR: -1 };
-  var HIP_SX = { FL: 1, FR: 1, RL: -1, RR: -1 };
-  var YAW_SIGN = { FL: -1, FR: 1, RL: -1, RR: 1 };         // + hip command = foot toward the FRONT
+  var HIP_SY = { FL: 1, FR: -1, RL: 1, RR: -1, ML: 1, MR: -1 };
+  var HIP_SX = { FL: 1, FR: 1, RL: -1, RR: -1, ML: 0, MR: 0 };     // hexapod middle legs sit at x = 0
+  var YAW_SIGN = { FL: -1, FR: 1, RL: -1, RR: 1, ML: -1, MR: 1 };  // + hip command = foot toward the FRONT
+  var STYLES = ['crab', 'hex', 'wheg'];
+  function legsOf(p) { return p.style === 'hex' ? Gait.HEX_LEGS : Gait.LEGS; }
+  var DENS = 6.8e-4;                      // g per mm3 of printed volume (PLA 1.24 g/cm3 with walls + ~25% infill)
 
   var BATTERY_PRESETS = {
     '4xAA': { label: '4 x AA holder (flat, with cover)', L: 62, W: 58, H: 17, mass: 135 },
@@ -1666,31 +1960,35 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     extraLength: [0, 40, 1], extraWidth: [0, 40, 1], cornerRadius: [2, 24, 1],
     coxaLen: [30, 60, 1], femurLen: [35, 95, 1], stanceAngle: [30, 75, 1], legWidth: [9, 16, 0.5],
     legThick: [2.6, 5, 0.2], legSplay: [30, 80, 1], footSize: [14, 32, 1], tipDrop: [8, 16, 1],
-    stride: [8, 30, 1], lift: [10, 35, 1], period: [0.8, 3, 0.1], sway: [0, 15, 1]
+    stride: [8, 30, 1], lift: [10, 35, 1], period: [0.8, 3, 0.1], sway: [0, 15, 1],
+    spokeLen: [30, 75, 1], spokeCount: [2, 6, 1], padSize: [8, 22, 1], padWidth: [5, 16, 1], maxThrottle: [0.2, 1, 0.05]
   };
 
   function defaults() {
     return {
-      version: 1, name: 'My Walker',
+      version: 2, name: 'My Walker', style: 'crab',
       extraLength: 0, extraWidth: 0, cornerRadius: 3, floorT: 3.5,
       coxaLen: 34, femurLen: 55, stanceAngle: 45, legWidth: 10, legThick: 3.2, legSplay: 50,
       footSize: 20, tipDrop: 8, footH: 9,
       stride: 20, lift: 25, period: 1.6, sway: 14,
       ams: [{ name: 'Sky blue', hex: '#3aa7ff' }, { name: 'Orange', hex: '#ff8a1f' },
             { name: 'Lime', hex: '#7ed321' }, { name: 'Pink', hex: '#ff5fa2' }],
-      slots: { body: 1, trim: 2, FL: 2, FR: 3, RL: 4, RR: 1, feet: 0 },   // feet 0 = same color as the leg
+      slots: { body: 1, trim: 2, FL: 2, FR: 3, RL: 4, RR: 1, ML: 3, MR: 2, feet: 0 },   // feet 0 = same color as the leg
       servo: { L: 22.8, W: 12.2, H: 22.5, tabSpan: 32.2, tabThick: 2.5, tabFromTop: 4.0, shaftOff: 5.9,
                holeSpan: 27.8, shaftH: 5.0, mass: 13.4, torque: 2.0, hornThick: 2.0, hornGap: 0.8,
                hornHoles: [5, 11], hub: 7.0, pilot: 1.6 },
       board: { L: 68, W: 46.5, H: 10.6, mass: 22 },
       microbit: { L: 52, W: 42, H: 4, mass: 8 },
       batteryPreset: '4xAA', battery: { L: 62, W: 58, H: 17, mass: 135 },
+      spokeLen: 48, spokeCount: 3, padSize: 12, padWidth: 8, maxThrottle: 0.4,
+      wheelServo: { torque: 1.3, mass: 10.6, rpm: 110 },
       clearance: 0.3, bed: 256
     };
   }
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function clampParams(p) {
+    if (STYLES.indexOf(p.style) < 0) p.style = 'crab';
     Object.keys(RANGES).forEach(function (k) {
       var r = RANGES[k]; if (typeof p[k] !== 'number' || isNaN(p[k])) p[k] = defaults()[k];
       p[k] = Math.min(r[1], Math.max(r[0], p[k]));
@@ -1706,7 +2004,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   };
 
   // ------------------------------------------------------------------ layout
-  function derive(p) {
+  function deriveLegged(p) {
     var s = p.servo, c = p.clearance, d = {};
     d.t = p.legThick;
     d.eL = p.board.L + 2 * c; d.eW = p.board.W + 2 * c;
@@ -1722,14 +2020,22 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     d.hy = d.halfLy - d.tabReach - 3;
     d.halfLx = d.hx + d.cutW / 2 + 4;
     d.bodyCy = d.hy - (s.L / 2 - s.shaftOff);                    // |y| of the hip servo body centre
+    d.legs = legsOf(p);
+    if (p.style === 'hex') {                                    // middle motors sit beside the bays, so the body is wider
+      d.bodyCy = d.innerW / 2 + 2 + d.cutL / 2 + p.extraWidth / 2;
+      d.hy = d.bodyCy + (s.L / 2 - s.shaftOff);
+      d.halfLy = d.hy + d.tabReach + 3;
+    }
+    d.win = {};
+    d.legs.forEach(function (l) { d.win[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.bodyCy]; });
     // roundest corner (up to the requested one) that still keeps every motor tab 2 mm inside the edge
     var req = Math.min(p.cornerRadius, d.halfLx - 1, d.halfLy - 1), r = req;
     function tabsInside(rad) {
       var o = G.rrect(0, 0, 2 * d.halfLx, 2 * d.halfLy, rad, 8), ok = true;
-      [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
-        var pt = [d.hx + a * (d.cutW / 2 + 1.5), d.bodyCy + b * (s.tabSpan / 2 + 0.5)];
+      d.legs.forEach(function (l) { [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
+        var pt = [d.win[l][0] + a * (d.cutW / 2 + 1.5), d.win[l][1] + b * (s.tabSpan / 2 + 0.5)];
         if (!G.pointInPoly(pt, o) || G.distToPolyEdge(pt, o) < 2.0) ok = false;
-      }); });
+      }); }); });
       return ok;
     }
     while (r > 0.5 && !tabsInside(r)) r -= 0.5;
@@ -1764,18 +2070,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     d.hip = {}; d.heading = {};
     var sp = p.legSplay;
     d.heading.FL = sp; d.heading.FR = -sp; d.heading.RL = 180 - sp; d.heading.RR = -(180 - sp);
-    LEGS.forEach(function (l) { d.hip[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.hy]; });
+    d.heading.ML = 90; d.heading.MR = -90;
+    d.legs.forEach(function (l) { d.hip[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.hy]; });
     return d;
   }
 
   // ------------------------------------------------------------------ parts (shells)
   function buildBody(p, d) {
-    var s = p.servo, holes = [], sx, sy, k;
+    var s = p.servo, holes = [], k;
     holes.push(G.rrect(0, d.yE, d.eL - 14, d.eW - 14, 3, 4));                       // window under the board
-    for (sx = -1; sx <= 1; sx += 2) for (sy = -1; sy <= 1; sy += 2) {
-      holes.push(G.rect(sx * d.hx, sy * d.bodyCy, d.cutW, d.cutL));
-      for (k = -1; k <= 1; k += 2) holes.push(G.circle(sx * d.hx, sy * d.bodyCy + k * s.holeSpan / 2, s.pilot / 2, 14));
-    }
+    d.legs.forEach(function (l) {
+      var w = d.win[l];
+      holes.push(G.rect(w[0], w[1], d.cutW, d.cutL));
+      for (k = -1; k <= 1; k += 2) holes.push(G.circle(w[0], w[1] + k * s.holeSpan / 2, s.pilot / 2, 14));
+    });
     return G.extrude(d.outline, holes, 0, d.floorT);
   }
 
@@ -1823,7 +2131,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   function buildFoot(p, d) {
-    var r = p.footSize / 2;
+    var r = Math.max(p.footSize, d.minFoot) / 2;       // too-small feet are flagged red by the check; keep the preview valid
     var base = G.extrude(G.circle(0, 0, r, 48), [], 0, d.footBase);
     var top = G.extrude(G.circle(0, 0, r, 48), [G.rect(0, 0, d.pocketU, d.pocketV)], d.footBase - 0.2, p.footH);
     return [base, top];
@@ -1837,7 +2145,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     foot: G.I3
   };
 
-  function buildParts(p, d) {
+  function buildPartsLegged(p, d) {
     return {
       body: [{ name: 'plate', slotKey: 'body', shells: [buildBody(p, d)] },
              { name: 'trim', slotKey: 'trim', shells: buildTrim(p, d) }],
@@ -1848,8 +2156,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   // The list of things to print: one Body + (coxa, femur, foot) per leg, each in print orientation, min corner at 0.
-  function printObjects(p, d, parts) {
-    parts = parts || buildParts(p, d);
+  function printObjectsLegged(p, d, parts) {
+    parts = parts || buildPartsLegged(p, d);
     var out = [];
     function make(kind, name, leg) {
       var rot = PRINT_ROT[kind], list = parts[kind].map(function (pt) {
@@ -1865,23 +2173,23 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                  size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], volume: vol });
     }
     make('body', 'Body');
-    LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       make('coxa', 'Upper leg ' + l, l); make('femur', 'Lower leg ' + l, l); make('foot', 'Foot ' + l, l);
     });
     return out;
   }
 
   // ------------------------------------------------------------------ hardware ghosts (preview only)
-  function hardware(p, d) {
-    var s = p.servo, fz = d.floorT, body = [], leg = [], knee = [], sx, sy;
+  function hardwareLegged(p, d) {
+    var s = p.servo, fz = d.floorT, body = [], leg = [], knee = [];
     body.push({ name: 'board', color: '#1f8a4c', size: [p.board.L, p.board.W, p.board.H], center: [0, d.yE, fz + p.board.H / 2] });
     body.push({ name: 'microbit', color: '#222a33', size: [p.microbit.L, p.microbit.W, p.microbit.H],
                 center: [0, d.yE, fz + p.board.H + p.microbit.H / 2] });
     body.push({ name: 'battery', color: '#6b7280', size: [p.battery.L, p.battery.W, p.battery.H], center: [0, d.yB, fz + p.battery.H / 2] });
-    for (sx = -1; sx <= 1; sx += 2) for (sy = -1; sy <= 1; sy += 2) {
-      body.push({ name: 'hipservo', color: '#2b6cb0', size: [s.W, s.L, s.H], center: [sx * d.hx, sy * d.bodyCy, d.hipFace + s.H / 2] });
-      body.push({ name: 'hiptab', color: '#2b6cb0', size: [s.W, s.tabSpan, s.tabThick], center: [sx * d.hx, sy * d.bodyCy, fz + s.tabThick / 2] });
-    }
+    d.legs.forEach(function (l) {
+      body.push({ name: 'hipservo', color: '#2b6cb0', size: [s.W, s.L, s.H], center: [d.win[l][0], d.win[l][1], d.hipFace + s.H / 2] });
+      body.push({ name: 'hiptab', color: '#2b6cb0', size: [s.W, s.tabSpan, s.tabThick], center: [d.win[l][0], d.win[l][1], fz + s.tabThick / 2] });
+    });
     leg.push({ name: 'hiphorn', color: '#e5e7eb', size: [19, 5.5, s.hornThick], center: [5.5, 0, (d.hornTop + d.hornBot) / 2] });
     leg.push({ name: 'kneeservo', color: '#2b6cb0', size: [s.L, s.H, s.W], center: [d.uc, d.vp0 + s.tabFromTop - s.H / 2, d.Kw] });
     leg.push({ name: 'kneetab', color: '#2b6cb0', size: [s.tabSpan, s.tabThick, s.W], center: [d.uc, d.vp0 - s.tabThick / 2, d.Kw] });
@@ -1900,26 +2208,25 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return [h[0] + u * Math.cos(yaw) - v * Math.sin(yaw), h[1] + u * Math.sin(yaw) + v * Math.cos(yaw), w];
   }
 
-  var DENS = 6.8e-4;                      // g per mm3 of printed volume (PLA 1.24 g/cm3 with walls + ~25% infill)
   function masses(p, d, objs) {
     var m = { body: 0, coxa: 0, femur: 0, foot: 0 };
     objs.forEach(function (o) { m[o.kind] += o.volume * DENS; });
     // per-leg average
-    var legMass = { fixed: (m.coxa / 4) + p.servo.mass, swing: (m.femur / 4) + (m.foot / 4) + 2 };
+    var nl = d.legs.length, legMass = { fixed: (m.coxa / nl) + p.servo.mass, swing: (m.femur / nl) + (m.foot / nl) + 2 };
     var bodyParts = [
       [m.body, 0, 0, d.floorT / 2], [p.board.mass, 0, d.yE, d.floorT + 5], [p.microbit.mass, 0, d.yE, d.floorT + p.board.H + 2],
       [p.battery.mass, 0, d.yB, d.floorT + p.battery.H / 2]
     ];
-    LEGS.forEach(function (l) { bodyParts.push([p.servo.mass, d.hip[l][0], HIP_SY[l] * d.bodyCy, d.floorT + 8]); });
+    d.legs.forEach(function (l) { bodyParts.push([p.servo.mass, d.win[l][0], d.win[l][1], d.floorT + 8]); });
     var bm = 0, bx = 0, by = 0, bz = 0;
     bodyParts.forEach(function (b) { bm += b[0]; bx += b[0] * b[1]; by += b[0] * b[2]; bz += b[0] * b[3]; });
     return { printed: m, leg: legMass, bodyMass: bm, bodyCom: [bx / bm, by / bm, bz / bm],
-             total: bm + 4 * (legMass.fixed + legMass.swing) };
+             total: bm + nl * (legMass.fixed + legMass.swing) };
   }
 
   function comAt(p, d, mass, pose) {
     var M = mass.bodyMass, x = mass.bodyCom[0] * M, y = mass.bodyCom[1] * M, z = mass.bodyCom[2] * M;
-    LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       var hip = pose[l + '_hip'], lift = pose[l + '_knee'];
       var f = legFK(p, d, l, hip, 0, [d.uc, d.vp0 - 6, d.Kw]);                 // coxa + knee servo
       x += mass.leg.fixed * f[0]; y += mass.leg.fixed * f[1]; z += mass.leg.fixed * f[2]; M += mass.leg.fixed;
@@ -1949,7 +2256,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   function walkCycle(p, steps) {
-    var W = new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay); W.command(1, 0);
+    var W = p.style === 'hex' ? new Gait.HexWalker(p.stride, p.lift, p.period, 2.0) : new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
+    W.command(1, 0);
     W.scale = { L: 1, R: 1 }; W.liftScale = 1; var out = [];
     for (var k = 0; k < steps; k++) { W.cycle = k / steps; out.push(W.pose()); }
     return out;
@@ -1957,17 +2265,17 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   function stability(p, d, mass) {
     var worst = Infinity, worstK = 0, minGap = Infinity, steps = 48, poses = walkCycle(p, steps);
-    var neutral = Gait.standPose(0), k;
+    var neutral = p.style === 'hex' ? Gait.hexStandPose(0) : Gait.standPose(0), k, nLegs = d.legs.length;
     poses.concat([neutral]).forEach(function (pose, idx) {
       var feet = [], stance = [];
-      LEGS.forEach(function (l) {
+      d.legs.forEach(function (l) {
         var f = legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee']); feet.push(f);
         if (pose[l + '_knee'] <= 1.0) stance.push([f[0], f[1]]);
       });
       var com = comAt(p, d, mass, pose), margin = -60;
       if (stance.length >= 3) margin = insideMargin(hull(stance), com);
       if (margin < worst) { worst = margin; worstK = idx; }
-      for (var i = 0; i < 4; i++) for (var j = i + 1; j < 4; j++) {          // clearance between feet (centre distance)
+      for (var i = 0; i < nLegs; i++) for (var j = i + 1; j < nLegs; j++) {          // clearance between feet (centre distance)
         var gap = Math.hypot(feet[i][0] - feet[j][0], feet[i][1] - feet[j][1]) - p.footSize;
         if (gap < minGap) minGap = gap;
       }
@@ -1978,17 +2286,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   // ------------------------------------------------------------------ checks (kid-readable)
   function mk(id, level, title, detail) { return { id: id, level: level, title: title, detail: detail }; }
 
-  function analyze(p, objs) {
-    var d = derive(p), checks = [];
-    objs = objs || printObjects(p, d);
+  function analyzeLegged(p, objs) {
+    var d = deriveLegged(p), checks = [];
+    objs = objs || printObjectsLegged(p, d);
     var mass = masses(p, d, objs), st = stability(p, d, mass), s = p.servo;
 
     // hip windows inside the body outline (the corner radius was already limited in derive())
     var worstEdge = Infinity;
-    LEGS.forEach(function (l) {
-      var sx = HIP_SX[l], sy = HIP_SY[l];
+    d.legs.forEach(function (l) {
       [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
-        var pt = [sx * d.hx + a * (d.cutW / 2 + 1.5), sy * (d.bodyCy + b * (s.tabSpan / 2 + 0.5))];
+        var pt = [d.win[l][0] + a * (d.cutW / 2 + 1.5), d.win[l][1] + b * (s.tabSpan / 2 + 0.5)];
         var inside = G.pointInPoly(pt, d.outline);
         worstEdge = Math.min(worstEdge, inside ? G.distToPolyEdge(pt, d.outline) : -G.distToPolyEdge(pt, d.outline));
       }); });
@@ -2002,11 +2309,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       : mk('floor', 'bad', 'Body plate too thick', 'Plate must be thinner than ' + (s.tabFromTop - 0.3).toFixed(1) + ' mm so the motor can poke through.'));
 
     var mg = st.margin;
-    checks.push(mg >= 12 ? mk('stable', 'ok', 'Steady walker', 'Safe even when one leg is lifted (' + mg.toFixed(0) + ' mm to spare).')
-      : mg >= 3 ? mk('stable', 'warn', 'A bit wobbly', 'Only ' + mg.toFixed(0) + ' mm to spare when a leg lifts. Try longer sideways legs or a smaller lift.')
-      : mk('stable', 'bad', 'Might tip over', 'The robot\'s weight falls outside its feet when a leg lifts. Spread the legs out or lower the lift.'));
+    var lifting = p.style === 'hex' ? 'three legs lift' : 'a leg lifts';
+    checks.push(mg >= 12 ? mk('stable', 'ok', 'Steady walker', 'Safe even when ' + lifting + ' (' + mg.toFixed(0) + ' mm to spare).')
+      : mg >= 3 ? mk('stable', 'warn', 'A bit wobbly', 'Only ' + mg.toFixed(0) + ' mm to spare when ' + lifting + '. Try longer sideways legs or a smaller lift.')
+      : mk('stable', 'bad', 'Might tip over', 'The robot\'s weight falls outside its feet when ' + lifting + '. Spread the legs out or lower the lift.'));
 
-    var hipMax = p.stride + p.sway;
+    var hipMax = p.stride + (p.style === 'hex' ? 0 : p.sway);
     checks.push(hipMax <= 40 ? mk('hiprange', 'ok', 'Hips swing a safe amount', 'Biggest hip swing ' + hipMax.toFixed(0) + '° (limit 45°).')
       : mk('hiprange', hipMax <= 45 ? 'warn' : 'bad', 'Hips swing a lot', 'Stride + weight shift = ' + hipMax.toFixed(0) + '°. Keep it under 45° or the motors hit their stops.'));
 
@@ -2064,8 +2372,47 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return plates;
   }
 
+  // ------------------------------------------------------------------ style dispatch (crab | hex | wheg)
+  function slotFor(p, key, leg) {
+    return key === 'body' ? p.slots.body : key === 'trim' ? p.slots.trim : key === 'leg' ? p.slots[leg] : (p.slots.feet || p.slots[leg]);
+  }
+  var Wheg = WhegMod.make({ mk: mk, packPlates: packPlates, buildTrim: buildTrim, slotFor: slotFor, DENS: DENS });
+  function isWheg(p) { return p.style === 'wheg'; }
+  function derive(p) { return isWheg(p) ? Wheg.derive(p) : deriveLegged(p); }
+  function buildParts(p, d) { return isWheg(p) ? Wheg.buildParts(p, d) : buildPartsLegged(p, d); }
+  function printObjects(p, d, parts) { return isWheg(p) ? Wheg.printObjects(p, d, parts) : printObjectsLegged(p, d, parts); }
+  function hardware(p, d) { return isWheg(p) ? Wheg.hardware(p, d) : hardwareLegged(p, d); }
+  function analyze(p, objs) { return isWheg(p) ? Wheg.analyze(p, objs) : analyzeLegged(p, objs); }
+
+  var STYLE_INFO = {
+    crab: { name: 'Crab walker', blurb: '4 legs, 8 motors. Creeps along one leg at a time and leans over the other three.', legs: Gait.LEGS, motors: 8 },
+    hex: { name: 'Hexapod', blurb: '6 legs, 12 motors. Three legs walk while three stand, so it is very steady.', legs: Gait.HEX_LEGS, motors: 12 },
+    wheg: { name: 'Windmill rover', blurb: '4 spinning spoked legs, 4 spin motors. Rolls fast and climbs over rough ground.', legs: Gait.LEGS, motors: 4 }
+  };
+  var STYLE_PRESETS = {
+    crab: PRESETS,
+    hex: {
+      'Starter hexapod': {},
+      'Tall hexapod': { coxaLen: 38, femurLen: 75, stanceAngle: 60, footSize: 22, legWidth: 12, legThick: 3.8 },
+      'Tiny hexapod': { coxaLen: 30, femurLen: 40, stanceAngle: 40, legSplay: 60, footSize: 18, stride: 16 }
+    },
+    wheg: {
+      'Starter rover': {},
+      'Rock crawler': { spokeLen: 58, spokeCount: 3, padSize: 14, padWidth: 10, extraLength: 16, extraWidth: 6, maxThrottle: 0.3, legWidth: 10 },
+      'Speedster': { spokeLen: 40, spokeCount: 4, padSize: 12, padWidth: 8, maxThrottle: 0.6 },
+      'Windmill': { spokeLen: 50, spokeCount: 4, padSize: 12, padWidth: 8, maxThrottle: 0.35 }
+    }
+  };
+  function styleDefaults(style) {
+    var p = defaults(); p.style = style;
+    if (style === 'hex') p.femurLen = 45;                      // 12 motors and a heavier body: shorter lower legs keep the knees comfortable
+    if (style === 'wheg') { p.batteryPreset = '4xAAA'; p.battery = { L: BATTERY_PRESETS['4xAAA'].L, W: BATTERY_PRESETS['4xAAA'].W, H: BATTERY_PRESETS['4xAAA'].H, mass: BATTERY_PRESETS['4xAAA'].mass }; }
+    return p;
+  }
+
   return {
-    LEGS: LEGS, HIP_SX: HIP_SX, HIP_SY: HIP_SY, YAW_SIGN: YAW_SIGN, RANGES: RANGES, PRESETS: PRESETS,
+    LEGS: LEGS, HIP_SX: HIP_SX, HIP_SY: HIP_SY, YAW_SIGN: YAW_SIGN, RANGES: RANGES, PRESETS: PRESETS, STYLES: STYLES, STYLE_INFO: STYLE_INFO,
+    STYLE_PRESETS: STYLE_PRESETS, styleDefaults: styleDefaults, legsOf: legsOf,
     BATTERY_PRESETS: BATTERY_PRESETS, PRINT_ROT: PRINT_ROT, DENS: DENS,
     defaults: defaults, clone: clone, clampParams: clampParams, derive: derive,
     buildParts: buildParts, printObjects: printObjects, hardware: hardware, femurOutline: femurOutline,
@@ -2181,13 +2528,24 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   function readme(info) {
-    return ['WALKER DESIGN - print files', '',
+    return ['WALKER DESIGN - print files (' + info.style + ')', '',
       'Open each plate_N.3mf in Bambu Studio (File > Open). Every part already knows which AMS slot (filament) it uses.',
       '',
       'Filament slots:'].concat(info.colors.map(function (c, i) { return '  Slot ' + (i + 1) + ': ' + c; })).concat([
       '', info.plates + ' plate(s), about ' + info.grams + ' g of plastic, about ' + info.hours + ' h of printing.',
       '', 'robot_settings.txt has the walking numbers for the robot code. walker_design.json holds every setting. Open the designer and use "Load design" to change it later.',
       'Not yet test-printed: print ONE leg first and check the servo fits (see design/kid-edition.md).']).join('\n') + '\n';
+  }
+
+  // Numbers for firmware/src/config.py (or the MakeCode blocks), matching what the preview shows
+  function settingsText(p) {
+    var st = p.style || 'crab', lines = ['STYLE = "' + st + '"'];
+    if (st === 'wheg') lines.push('WHEG_MAX_THROTTLE = ' + p.maxThrottle);
+    else {
+      lines.push('GAIT_STRIDE_DEG = ' + p.stride, 'GAIT_LIFT_DEG = ' + p.lift, 'GAIT_PERIOD_S = ' + p.period);
+      if (st === 'crab') lines.push('GAIT_SWAY_DEG = ' + p.sway, 'GAIT_SPLAY_DEG = ' + p.legSplay);
+    }
+    return lines.join('\n') + '\n';
   }
 
   // Returns Promise<Uint8Array> of a zip: plate_1.3mf ..., walker_design.json, README.txt
@@ -2205,14 +2563,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     });
     return Promise.all(jobs).then(function () {
       outer.file('walker_design.json', JSON.stringify({ app: 'Walker Designer', version: 1, params: params }, null, 1));
-      outer.file('robot_settings.txt', 'GAIT_STRIDE_DEG = ' + params.stride + '\nGAIT_LIFT_DEG = ' + params.lift + '\nGAIT_PERIOD_S = ' + params.period + '\nGAIT_SWAY_DEG = ' + params.sway + '\nGAIT_SPLAY_DEG = ' + params.legSplay + '\n');
-      outer.file('README.txt', readme({ colors: params.ams.map(function (c) { return c.name; }), plates: plates.length,
+      outer.file('robot_settings.txt', settingsText(params));
+      outer.file('README.txt', readme({ style: (params.style || 'crab'), colors: params.ams.map(function (c) { return c.name; }), plates: plates.length,
         grams: Math.round(an.grams), hours: (an.grams * 2.2 / 60).toFixed(1) }));
       return outer.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     });
   }
 
-  return { plateFiles: plateFiles, buildZip: buildZip, mergeShells: mergeShells };
+  return { plateFiles: plateFiles, buildZip: buildZip, mergeShells: mergeShells, settingsText: settingsText };
 });
 
 </script>
@@ -2220,8 +2578,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 (function () {
   'use strict';
   var M = WD.model, G = WD.geom, Gait = WD.gait, X = WD.export3mf, DEG = Math.PI / 180;
-  var STORE = 'walker-designer-v1';
-  var p = M.defaults(), d, parts, objs, an;
+  var STORE = 'walker-designer-v2';
+  var designs = {}, p = M.styleDefaults('crab'), d, parts, objs, an;
   var $ = function (id) { return document.getElementById(id); };
   function el(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -2234,8 +2592,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   function getPath(o, path) { return path.split('.').reduce(function (a, k) { return a[k]; }, o); }
   function setPath(o, path, v) { var ks = path.split('.'), last = ks.pop(); ks.reduce(function (a, k) { return a[k]; }, o)[last] = v; }
 
-  // ------------------------------------------------------------------ saved design
-  function save() { try { localStorage.setItem(STORE, JSON.stringify(p)); } catch (e) {} }
+  // ------------------------------------------------------------------ saved designs (one per style)
+  function save() {
+    designs[p.style] = p;
+    try { localStorage.setItem(STORE, JSON.stringify({ style: p.style, designs: designs })); } catch (e) {}
+  }
   function mergeInto(base, src) {
     Object.keys(src || {}).forEach(function (k) {
       if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k]) && base[k] && typeof base[k] === 'object') mergeInto(base[k], src[k]);
@@ -2244,38 +2605,66 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     });
     return base;
   }
-  function adopt(src) { p = M.clampParams(mergeInto(M.defaults(), src)); }
-  try { var raw = localStorage.getItem(STORE); if (raw) adopt(JSON.parse(raw)); } catch (e) { p = M.defaults(); }
+  function fromSaved(src) {
+    var st = M.STYLES.indexOf(src && src.style) >= 0 ? src.style : 'crab';
+    return M.clampParams(mergeInto(M.styleDefaults(st), src || {}));
+  }
+  try {
+    var raw = localStorage.getItem(STORE);
+    if (raw) {
+      var st0 = JSON.parse(raw);
+      Object.keys(st0.designs || {}).forEach(function (k) { designs[k] = fromSaved(st0.designs[k]); });
+      p = designs[st0.style] || p;
+    }
+  } catch (e) { designs = {}; p = M.styleDefaults('crab'); }
 
-  // ------------------------------------------------------------------ control definitions (kid words)
-  var TABS = [
-    { id: 'shape', name: 'Body', checks: ['corners', 'bed', 'floor'] },
-    { id: 'legs', name: 'Legs', checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
-    { id: 'walk', name: 'Walking', checks: ['stable', 'hiprange'] },
-    { id: 'colors', name: 'Colors', checks: [] },
-    { id: 'parts', name: 'My parts', checks: [] },
-    { id: 'finish', name: 'Finish', checks: [] }
+  // ------------------------------------------------------------------ control definitions (kid words), per style
+  var LEG_NAMES = { FL: 'Front-left', FR: 'Front-right', ML: 'Middle-left', MR: 'Middle-right', RL: 'Back-left', RR: 'Back-right' };
+  var BODY_SLIDERS = [
+    { k: 'extraLength', label: 'Longer body', unit: 'mm', hint: 'Adds room front to back.' },
+    { k: 'extraWidth', label: 'Wider body', unit: 'mm', hint: 'Adds room side to side.' },
+    { k: 'cornerRadius', label: 'Round corners', unit: 'mm', hint: 'Bigger numbers make softer corners (limited by where the motors sit).' }
   ];
-  var SLIDERS = {
-    shape: [
-      { k: 'extraLength', label: 'Longer body', unit: 'mm', hint: 'Adds room front to back.' },
-      { k: 'extraWidth', label: 'Wider body', unit: 'mm', hint: 'Adds room side to side.' },
-      { k: 'cornerRadius', label: 'Round corners', unit: 'mm', hint: 'Bigger numbers make softer corners (limited by where the motors sit).' }
+  var LEG_SLIDERS = [
+    { k: 'coxaLen', label: 'Upper leg length', unit: 'mm', hint: 'The part from the hip motor out to the knee motor.' },
+    { k: 'femurLen', label: 'Lower leg length', unit: 'mm', hint: 'Longer legs make a taller robot.' },
+    { k: 'stanceAngle', label: 'Lower leg slope', unit: '°', hint: 'How far the lower leg tilts down from level.' },
+    { k: 'legSplay', label: 'Point legs outward', unit: '°', hint: 'Small = legs point to the front and back. Big = legs point to the sides.' },
+    { k: 'legWidth', label: 'Leg width', unit: 'mm', hint: 'Wider legs are stronger.' },
+    { k: 'legThick', label: 'Leg thickness', unit: 'mm', hint: 'Thicker legs are stronger and heavier.' },
+    { k: 'footSize', label: 'Foot size', unit: 'mm', hint: 'Bigger feet keep the robot from tipping.' }
+  ];
+  var WALK = [
+    { k: 'stride', label: 'Step size', unit: '°', hint: 'How far each foot swings forward and back.' },
+    { k: 'lift', label: 'How high feet lift', unit: '°', hint: 'Bigger lifts clear bumps but make the robot wobble more.' },
+    { k: 'period', label: 'Time for one full walk cycle', unit: 's', hint: 'Smaller = faster walker.' }
+  ];
+  var SWAY = { k: 'sway', label: 'Lean over standing legs', unit: '°', hint: 'Shifts weight onto the three feet that stay down. Helps a lot.' };
+  var PANEL = {
+    crab: [
+      { id: 'shape', name: 'Body', intro: 'The body holds the brain, battery and four hip motors. Make it bigger to fit more.', sliders: BODY_SLIDERS, checks: ['corners', 'bed', 'floor'] },
+      { id: 'legs', name: 'Legs', intro: 'Each leg has a hip motor and a knee motor. All four legs are printed the same.', sliders: LEG_SLIDERS, checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
+      { id: 'walk', name: 'Walking', intro: 'Try changes while the robot walks. These numbers also go into the walking code.', sliders: WALK.concat([SWAY]), checks: ['stable', 'hiprange'] }
     ],
-    legs: [
-      { k: 'coxaLen', label: 'Upper leg length', unit: 'mm', hint: 'The part from the hip motor out to the knee motor.' },
-      { k: 'femurLen', label: 'Lower leg length', unit: 'mm', hint: 'Longer legs make a taller robot.' },
-      { k: 'stanceAngle', label: 'Lower leg slope', unit: '°', hint: 'How far the lower leg tilts down from level.' },
-      { k: 'legSplay', label: 'Point legs outward', unit: '°', hint: 'Small = legs point to the front and back. Big = legs point to the sides.' },
-      { k: 'legWidth', label: 'Leg width', unit: 'mm', hint: 'Wider legs are stronger.' },
-      { k: 'legThick', label: 'Leg thickness', unit: 'mm', hint: 'Thicker legs are stronger and heavier.' },
-      { k: 'footSize', label: 'Foot size', unit: 'mm', hint: 'Bigger feet keep the robot from tipping.' }
+    hex: [
+      { id: 'shape', name: 'Body', intro: 'The body holds the brain, battery and six hip motors. The middle motors sit beside the battery, so it is wider than the crab.', sliders: BODY_SLIDERS, checks: ['corners', 'bed', 'floor'] },
+      { id: 'legs', name: 'Legs', intro: 'Six legs, all printed the same. Shorter lower legs put less strain on the motors.', sliders: LEG_SLIDERS, checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
+      { id: 'walk', name: 'Walking', intro: 'Three legs step while three stand, then they swap. That keeps it steady without leaning.', sliders: WALK, checks: ['stable', 'hiprange'] }
     ],
-    walk: [
-      { k: 'stride', label: 'Step size', unit: '°', hint: 'How far each foot swings forward and back.' },
-      { k: 'lift', label: 'How high feet lift', unit: '°', hint: 'Bigger lifts clear bumps but make the robot wobble more.' },
-      { k: 'period', label: 'Time for 4 steps', unit: 's', hint: 'Smaller = faster walker.' },
-      { k: 'sway', label: 'Lean over standing legs', unit: '°', hint: 'Shifts weight onto the three feet that stay down. Helps a lot.' }
+    wheg: [
+      { id: 'shape', name: 'Body', intro: 'The body is a tray with two walls that hold the four spin motors. A longer body leaves room for bigger spokes.',
+        sliders: [BODY_SLIDERS[0], BODY_SLIDERS[1]], checks: ['floor', 'bed'] },
+      { id: 'legs', name: 'Windmill legs', intro: 'Each leg is a hub with spokes that spins all the way round. The spokes grab and lift the robot over bumps. All four are printed the same.', sliders: [
+        { k: 'spokeLen', label: 'Spoke length', unit: 'mm', hint: 'Longer spokes climb bigger bumps but need stronger motors and a longer body.' },
+        { k: 'spokeCount', label: 'Number of spokes', unit: '', hint: 'More spokes ride smoother. Fewer spokes grab harder.' },
+        { k: 'legWidth', label: 'Spoke width', unit: 'mm', hint: 'Wider spokes are stronger.' },
+        { k: 'legThick', label: 'Spoke thickness', unit: 'mm', hint: 'Thicker spokes are stronger and heavier.' },
+        { k: 'padSize', label: 'Tip pad size', unit: 'mm', hint: 'The round pad at the end of every spoke.' },
+        { k: 'padWidth', label: 'Tip pad width', unit: 'mm', hint: 'Wide pads grip better and stop the robot sinking in soft ground.' }
+      ], checks: ['wheelgap', 'height', 'thin', 'foot'] },
+      { id: 'walk', name: 'Driving', intro: 'Spin motors turn all the way round, so there is no step size. Pick how fast they go.', sliders: [
+        { k: 'maxThrottle', label: 'Top speed', unit: '%', mult: 100, hint: 'Start low. These motors are fast and the robot can flip over bumps.' }
+      ], checks: ['speed', 'muscle', 'stable'] }
     ]
   };
   var BATTERY_FIELDS = [['battery.L', 'Battery holder length (mm)'], ['battery.W', 'Width (mm)'], ['battery.H', 'Height (mm)'], ['battery.mass', 'Weight with batteries (g)']];
@@ -2287,34 +2676,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   var SWATCHES = [['Sky blue', '#3aa7ff'], ['Blue', '#1f4fd8'], ['Teal', '#14b8a6'], ['Lime', '#7ed321'], ['Green', '#1f9d55'], ['Yellow', '#ffd23f'],
                   ['Orange', '#ff8a1f'], ['Red', '#e5383b'], ['Pink', '#ff5fa2'], ['Purple', '#8a4fd8'], ['White', '#f4f4f0'], ['Black', '#262a33']];
 
-  // ------------------------------------------------------------------ build panel
-  var tabsEl = $('tabs');
-  TABS.forEach(function (t) {
-    var b = el('button', { type: 'button', role: 'tab', id: 'tabbtn-' + t.id, 'aria-controls': 'tab-' + t.id, 'aria-selected': 'false' });
-    b.appendChild(el('span', { text: t.name }));
-    b.appendChild(el('span', { class: 'dot ok', id: 'tabdot-' + t.id, hidden: '' }));
-    b.addEventListener('click', function () { showTab(t.id); });
-    tabsEl.appendChild(b);
-  });
-  var curTab = 'shape';
-  function showTab(id) {
-    curTab = id;
-    TABS.forEach(function (t) {
-      $('tab-' + t.id).hidden = t.id !== id;
-      $('tabbtn-' + t.id).setAttribute('aria-selected', t.id === id ? 'true' : 'false');
-    });
-    if (id === 'finish') renderFinish();
-  }
-
-  var outputs = {};
+  // ------------------------------------------------------------------ panel (rebuilt when the style changes)
+  var tabsEl = $('tabs'), secs = $('secs'), outputs = {}, fieldInputs = {}, curTab = 'shape', tabList = [];
   function sliderRow(def) {
-    var r = M.RANGES[def.k], id = 'sl-' + def.k, out = el('output', { for: id });
+    var r = M.RANGES[def.k], id = 'sl-' + def.k, mult = def.mult || 1, out = el('output', { for: id });
     var inp = el('input', { type: 'range', id: id, min: r[0], max: r[1], step: r[2] });
     inp.addEventListener('input', function () { p[def.k] = parseFloat(inp.value); changed(); });
-    outputs[def.k] = { inp: inp, out: out, unit: def.unit, step: r[2] };
+    outputs[def.k] = { inp: inp, out: out, unit: def.unit, step: r[2] * mult, mult: mult };
     return el('div', { class: 'row' }, [
-      el('div', { class: 'head' }, [el('label', { for: id, text: def.label }), out]),
-      inp, el('div', { class: 'hint', text: def.hint })]);
+      el('div', { class: 'head' }, [el('label', { for: id, text: def.label }), out]), inp, el('div', { class: 'hint', text: def.hint })]);
   }
   function numField(path, label, step) {
     var id = 'f-' + path.replace('.', '-'), inp = el('input', { type: 'number', id: id, step: step || 0.1, min: 0, inputmode: 'decimal' });
@@ -2327,24 +2697,43 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     fieldInputs[path] = inp;
     return el('div', { class: 'field' }, [el('label', { for: id, text: label }), inp]);
   }
-  var fieldInputs = {};
-
   function checksBox(tabId) { return el('div', { class: 'tabchecks', id: 'tc-' + tabId }, [el('h3', { text: 'Checks for this page' }), el('ul', { class: 'checks' })]); }
 
-  ['shape', 'legs', 'walk'].forEach(function (id) {
-    var sec = $('tab-' + id);
-    var intro = { shape: 'The body holds the brain, battery and four hip motors. Make it bigger to fit more.',
-                  legs: 'Each leg has a hip motor and a knee motor. All four legs are printed the same.',
-                  walk: 'Try changes while the robot walks. These numbers also go into the walking code.' }[id];
-    sec.appendChild(el('p', { class: 'intro', text: intro }));
-    SLIDERS[id].forEach(function (def) { sec.appendChild(sliderRow(def)); });
-    sec.appendChild(checksBox(id));
-  });
+  function buildPanel() {
+    var st = p.style, info = M.STYLE_INFO[st], spec = PANEL[st];
+    tabsEl.innerHTML = ''; secs.innerHTML = ''; outputs = {}; fieldInputs = {};
+    tabList = spec.map(function (t) { return { id: t.id, name: t.name, checks: t.checks }; })
+      .concat([{ id: 'colors', name: 'Colors', checks: [] }, { id: 'parts', name: 'My parts', checks: [] }, { id: 'finish', name: 'Finish', checks: [] }]);
+    tabList.forEach(function (t) {
+      var b = el('button', { type: 'button', role: 'tab', id: 'tabbtn-' + t.id, 'aria-controls': 'tab-' + t.id, 'aria-selected': 'false' });
+      b.appendChild(el('span', { text: t.name }));
+      b.appendChild(el('span', { class: 'dot ok', id: 'tabdot-' + t.id, hidden: '' }));
+      b.addEventListener('click', function () { showTab(t.id); });
+      tabsEl.appendChild(b);
+      secs.appendChild(el('section', { class: 'tab', id: 'tab-' + t.id, role: 'tabpanel', hidden: '' }));
+    });
+    spec.forEach(function (t) {
+      var sec = $('tab-' + t.id);
+      sec.appendChild(el('p', { class: 'intro', text: t.intro }));
+      t.sliders.forEach(function (def) { sec.appendChild(sliderRow(def)); });
+      sec.appendChild(checksBox(t.id));
+    });
+    buildColors(info); buildParts(st); buildFinish(st);
+    if (!$('tab-' + curTab)) curTab = 'shape';
+    showTab(curTab);
+  }
+  function showTab(id) {
+    curTab = id;
+    tabList.forEach(function (t) {
+      $('tab-' + t.id).hidden = t.id !== id;
+      $('tabbtn-' + t.id).setAttribute('aria-selected', t.id === id ? 'true' : 'false');
+    });
+    if (id === 'finish') renderFinish();
+  }
 
-  // colors
-  (function () {
+  function buildColors(info) {
     var sec = $('tab-colors');
-    sec.appendChild(el('p', { class: 'intro', text: 'Your printer has 4 filament slots. Pick the color in each slot, then say which part uses which slot. Print parts that move against each other in different colors.' }));
+    sec.appendChild(el('p', { class: 'intro', text: 'Your printer has 4 filament slots. Pick the color in each slot, then say which part uses which slot. Parts that move against each other look best in different colors.' }));
     for (var i = 0; i < 4; i++) (function (i) {
       var sw = el('div', { class: 'swatches', role: 'group', 'aria-label': 'Slot ' + (i + 1) + ' color' });
       SWATCHES.forEach(function (c) {
@@ -2356,44 +2745,53 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       sec.appendChild(el('div', { class: 'slotline' }, [
         el('div', { class: 'nm' }, [el('span', { class: 'chipc', id: 'slotchip' + i }), el('span', { id: 'slotname' + i })]), sw]));
     })(i);
-    var as = el('div', { class: 'assign' });
-    [['body', 'Body'], ['trim', 'Rubber-band hooks'], ['FL', 'Front-left leg'], ['FR', 'Front-right leg'], ['RL', 'Back-left leg'], ['RR', 'Back-right leg']].forEach(function (a) {
+    var as = el('div', { class: 'assign' }), wheg = p.style === 'wheg';
+    var rows = [['body', 'Body'], ['trim', 'Rubber-band hooks']].concat(info.legs.map(function (l) {
+      return [l, LEG_NAMES[l] + (wheg ? ' windmill leg' : ' leg')];
+    }));
+    rows.forEach(function (a) {
       var s = el('select', { id: 'as-' + a[0] });
       s.addEventListener('change', function () { p.slots[a[0]] = parseInt(s.value, 10); changed(); });
       as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-' + a[0], text: a[1] }), s]));
     });
     var fs = el('select', { id: 'as-feet' });
     fs.addEventListener('change', function () { p.slots.feet = parseInt(fs.value, 10); changed(); });
-    as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-feet', text: 'Feet' }), fs]));
+    as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-feet', text: wheg ? 'Tip pads' : 'Feet' }), fs]));
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Which slot prints which part' }), as]));
-  })();
+  }
 
-  // my parts
-  (function () {
+  function buildParts(st) {
     var sec = $('tab-parts');
     sec.appendChild(el('p', { class: 'intro', text: 'The body is cut to fit your real parts. Measure yours with calipers and type the numbers in. The starting numbers are typical, not exact.' }));
     var bp = el('select', { id: 'batpreset' });
     Object.keys(M.BATTERY_PRESETS).forEach(function (k) { bp.appendChild(el('option', { value: k, text: M.BATTERY_PRESETS[k].label })); });
     bp.addEventListener('change', function () {
       p.batteryPreset = bp.value;
-      if (bp.value !== 'custom') p.battery = JSON.parse(JSON.stringify(M.BATTERY_PRESETS[bp.value])), delete p.battery.label;
+      if (bp.value !== 'custom') { p.battery = JSON.parse(JSON.stringify(M.BATTERY_PRESETS[bp.value])); delete p.battery.label; }
       changed();
     });
     var bf = el('div', { class: 'fields' }); BATTERY_FIELDS.forEach(function (f) { bf.appendChild(numField(f[0], f[1], 1)); });
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Battery holder' }), el('div', { class: 'field' }, [el('label', { for: 'batpreset', text: 'Which holder?' }), bp]), bf]));
+    var titles = { servo: st === 'wheg' ? 'Spin motors (continuous-rotation micro servos, FS90R size)' : 'Leg motors (9 g micro servos)', board: 'Control boards' };
     ['servo', 'board'].forEach(function (g) {
       var f = el('div', { class: 'fields' }); PART_FIELDS[g].forEach(function (x) { f.appendChild(numField(x[0], x[1] + ' (mm)', 0.1)); });
-      sec.appendChild(el('fieldset', {}, [el('legend', { text: g === 'servo' ? 'Leg motors (9 g micro servos)' : 'Control boards' }), f]));
+      var kids = [el('legend', { text: titles[g] }), f];
+      if (g === 'servo' && st === 'wheg') {
+        var f2 = el('div', { class: 'fields' });
+        f2.appendChild(numField('wheelServo.torque', 'Motor torque (kg-cm)', 0.1)); f2.appendChild(numField('wheelServo.mass', 'Motor weight (g)', 0.1));
+        f2.appendChild(numField('wheelServo.rpm', 'Top speed (rpm)', 1));
+        kids.push(f2);
+      }
+      sec.appendChild(el('fieldset', {}, kids));
     });
     var fx = el('div', { class: 'fields' });
     fx.appendChild(numField('clearance', 'Extra gap around parts (mm)', 0.05));
     fx.appendChild(numField('bed', 'Print bed size (mm)', 1));
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Printer fit' }), fx,
       el('p', { class: 'note', text: 'A larger gap makes parts slide in easily. A smaller gap grips tighter. 0.3 mm suits most printers.' })]));
-  })();
+  }
 
-  // finish
-  (function () {
+  function buildFinish(st) {
     var sec = $('tab-finish');
     sec.appendChild(el('p', { class: 'intro', text: 'When every light is green or yellow, make the print files. Open them in Bambu Studio, then send them to the printer.' }));
     sec.appendChild(el('div', { class: 'stats', id: 'fstats' }));
@@ -2405,38 +2803,63 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       el('input', { type: 'file', id: 'loadjson', accept: '.json,application/json', hidden: '' }),
       el('button', { type: 'button', class: 'btn', id: 'reset', text: 'Start over' })]));
     sec.appendChild(el('p', { class: 'note', id: 'makenote' }));
-    sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Walking numbers for the robot code' }), el('pre', { class: 'code', id: 'fwnums' }),
-      el('p', { class: 'note', text: 'These match what you see walking here. They go in firmware/src/config.py, or into the MakeCode walker blocks.' })]));
+    sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Numbers for the robot code' }), el('pre', { class: 'code', id: 'fwnums' }),
+      el('p', { class: 'note', text: 'These match what you see here. They go in firmware/src/config.py, or into the MakeCode walker blocks.' })]));
+    var extra = st === 'wheg' ? [
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Set each spin motor to stop' }), el('span', { text: 'Continuous motors creep when they should be still. Turn the little trim screw until each one stops, with the wheels off.' })])])] : [];
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Before you print' }), el('ul', { class: 'checks' }, [
-      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Print one leg first' }), el('span', { text: 'Check that a motor slides in snugly before you print everything. Nothing here has been test printed yet.' })])]),
-      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Measure your motors' }), el('span', { text: 'Use the My parts page if your motor is not exactly the starting size.' })])])])]));
-  })();
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Print one ' + (st === 'wheg' ? 'windmill leg' : 'leg') + ' first' }), el('span', { text: 'Check that a motor slides in snugly before you print everything. Nothing here has been test printed yet.' })])]),
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Measure your motors' }), el('span', { text: 'Use the My parts page if your motor is not exactly the starting size.' })])])].concat(extra))]));
+    $('make').addEventListener('click', makeFiles);
+    $('savejson').addEventListener('click', function () { saveFile(slug() + '-design.json', JSON.stringify({ app: 'Walker Designer', version: 2, params: p }, null, 1), 'application/json'); });
+    $('loadjson').addEventListener('change', loadFile);
+    $('reset').addEventListener('click', resetClick);
+  }
 
-  // ------------------------------------------------------------------ presets
-  var presetsEl = $('presets');
-  Object.keys(M.PRESETS).forEach(function (name) {
-    var b = el('button', { type: 'button', class: 'chip', text: name, 'aria-pressed': 'false' });
-    b.addEventListener('click', function () {
-      var keepAms = p.ams, keepSlots = p.slots, keepName = p.name;
-      p = M.defaults(); mergeInto(p, M.PRESETS[name]); p.ams = keepAms; p.slots = keepSlots; p.name = keepName;
-      M.clampParams(p); changed(true);
-      Array.prototype.forEach.call(presetsEl.querySelectorAll('.chip'), function (c) { c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); });
-    });
-    presetsEl.appendChild(b);
+  // ------------------------------------------------------------------ style cards + presets
+  var stylesEl = $('styles'), presetsEl = $('presets');
+  M.STYLES.forEach(function (st) {
+    var info = M.STYLE_INFO[st];
+    var b = el('button', { type: 'button', class: 'stylecard', role: 'radio', 'data-style': st, 'aria-checked': 'false' }, [
+      el('b', { text: info.name }), el('span', { class: 'sub', text: (st === 'wheg' ? '4 spinning legs' : info.legs.length + ' legs') + ' · ' + info.motors + ' motors' }),
+      el('span', { class: 'blurb', text: info.blurb })]);
+    b.addEventListener('click', function () { switchStyle(st); });
+    stylesEl.appendChild(b);
   });
+  function switchStyle(st) {
+    if (st === p.style) return;
+    designs[p.style] = p;
+    var keep = { name: p.name, ams: p.ams, slots: p.slots, bed: p.bed };
+    p = designs[st] || mergeInto(M.styleDefaults(st), { ams: keep.ams, slots: keep.slots, bed: keep.bed });
+    p.name = keep.name;
+    buildPanel(); buildPresets(); changed(true);
+  }
+  function buildPresets() {
+    presetsEl.innerHTML = ''; presetsEl.appendChild(el('span', { class: 'lbl', text: 'Start from' }));
+    var list = M.STYLE_PRESETS[p.style];
+    Object.keys(list).forEach(function (name) {
+      var b = el('button', { type: 'button', class: 'chip', text: name, 'aria-pressed': 'false' });
+      b.addEventListener('click', function () {
+        var keep = { name: p.name, ams: p.ams, slots: p.slots, style: p.style };
+        p = M.styleDefaults(keep.style); mergeInto(p, list[name]); p.ams = keep.ams; p.slots = keep.slots; p.name = keep.name;
+        M.clampParams(p); changed(true);
+        Array.prototype.forEach.call(presetsEl.querySelectorAll('.chip'), function (c) { c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); });
+      });
+      presetsEl.appendChild(b);
+    });
+  }
   $('rname').addEventListener('input', function () { p.name = this.value || 'My Walker'; save(); });
 
   // ------------------------------------------------------------------ 3D scene
   var scene, camera, renderer, controls, robot, plateGroup, floor, ghostOn = true, walking = true, mode = 'robot', plateIdx = 0;
-  var matCache = {}, legG = {}, kneeG = {}, ghosts = [], walker, lastT = 0, prevStanceX = null, floorX = 0, camName = 'angle';
+  var matCache = {}, legG = {}, kneeG = {}, spinG = {}, ghosts = [], walker, lastT = 0, prevStanceX = null, floorX = 0, camName = 'angle';
   function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
   function mat(hex) { return matCache[hex] || (matCache[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0.05 })); }
 
   function initScene() {
     var host = $('view');
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-    } catch (e) { $('nogl').hidden = false; return false; }
+    try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true }); }
+    catch (e) { $('nogl').hidden = false; return false; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     host.appendChild(renderer.domElement);
     scene = new THREE.Scene();
@@ -2449,8 +2872,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     robot = new THREE.Group(); scene.add(robot);
     plateGroup = new THREE.Group(); scene.add(plateGroup);
     floor = new THREE.Group(); scene.add(floor);
-    buildFloor();
-    resize();
+    buildFloor(); resize();
     if (window.ResizeObserver) new ResizeObserver(resize).observe($('stage')); else window.addEventListener('resize', resize);
     applyTheme();
     return true;
@@ -2485,7 +2907,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function addParts(group, list, leg, shift, geoms) {
     list.forEach(function (pt, i) {
-      var key = leg + '|' + pt.name, geo = geoms && geoms[pt.name + i];
+      var geo = geoms && geoms[pt.name + i];
       if (!geo) { geo = G.toBufferGeometry(pt.shells); if (geoms) geoms[pt.name + i] = geo; }
       var m = new THREE.Mesh(geo, mat(p.ams[slotFor(pt.slotKey, leg) - 1].hex));
       m.userData.shared = !!geoms;
@@ -2501,39 +2923,74 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   function buildRobot() {
-    clearGroup(robot); legG = {}; kneeG = {}; ghosts = [];
-    robot.position.z = d.standH;
-    var hw = M.hardware(p, d);
-    var bodyG = new THREE.Group(); robot.add(bodyG);
+    clearGroup(robot); legG = {}; kneeG = {}; spinG = {}; ghosts = [];
+    var hw = M.hardware(p, d), bodyG = new THREE.Group(); robot.add(bodyG);
     addParts(bodyG, parts.body, 'body');
     hw.body.forEach(function (h) { bodyG.add(box(h)); });
-    var coxaGeo = {}, femGeo = {}, footGeo = {};
-    M.LEGS.forEach(function (l) {
-      var g = new THREE.Group(); g.position.set(d.hip[l][0], d.hip[l][1], 0); robot.add(g); legG[l] = g;
-      addParts(g, parts.coxa, l, null, coxaGeo);
-      hw.leg.forEach(function (h) { g.add(box(h)); });
-      var k = new THREE.Group(); k.position.set(d.a, 0, d.Kw); g.add(k); kneeG[l] = k;
-      addParts(k, parts.femur, l, [-d.a, 0, -d.Kw], femGeo);
-      addParts(k, parts.foot, l, [-d.a, 0, -d.Kw], footGeo);
-      hw.knee.forEach(function (h) { k.add(box(h)); });
-    });
+    var cur = walker ? walker.cycle || 0 : 0;
+    if (p.style === 'wheg') {
+      var wGeo = {};
+      Gait.LEGS.forEach(function (l) {
+        var sx = M.HIP_SX[l], sy = M.HIP_SY[l];
+        var g = new THREE.Group(); g.position.set(sx * d.axleX, 0, d.axleZ); robot.add(g);
+        var orient = new THREE.Group(); orient.rotation.x = sy > 0 ? -Math.PI / 2 : Math.PI / 2; g.add(orient);
+        var spin = new THREE.Group(); orient.add(spin); spinG[l] = spin;
+        addParts(spin, parts.wheg, l, null, wGeo);
+      });
+      walker = new Gait.WhegDrive(p.maxThrottle, p.wheelServo.rpm, 2.0); walker.command(1, 0); walker.style = 'wheg';
+      walker.scale = { L: 1, R: 1 };
+      applyWheels(walker.angle, true);
+    } else {
+      var coxaGeo = {}, femGeo = {}, footGeo = {};
+      d.legs.forEach(function (l) {
+        var g = new THREE.Group(); g.position.set(d.hip[l][0], d.hip[l][1], 0); robot.add(g); legG[l] = g;
+        addParts(g, parts.coxa, l, null, coxaGeo);
+        hw.leg.forEach(function (h) { g.add(box(h)); });
+        var k = new THREE.Group(); k.position.set(d.a, 0, d.Kw); g.add(k); kneeG[l] = k;
+        addParts(k, parts.femur, l, [-d.a, 0, -d.Kw], femGeo);
+        addParts(k, parts.foot, l, [-d.a, 0, -d.Kw], footGeo);
+        hw.knee.forEach(function (h) { k.add(box(h)); });
+      });
+      robot.position.z = d.standH;
+      walker = p.style === 'hex' ? new Gait.HexWalker(p.stride, p.lift, p.period, 2.0) : new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
+      walker.command(1, 0); walker.style = p.style; walker.scale = { L: 1, R: 1 }; walker.liftScale = 1; walker.cycle = cur;
+      applyPose(walking ? walker.pose() : standPoseNow());
+    }
     ghosts.forEach(function (m) { m.visible = ghostOn; });
-    var W = 2 * d.halfLx, L = 2 * d.halfLy;
-    $('dims').textContent = 'Body ' + W.toFixed(0) + ' × ' + L.toFixed(0) + ' mm · stands ' + d.standH.toFixed(0) + ' mm tall';
-    var cur = walker ? walker.cycle : 0;
-    walker = new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
-    walker.command(1, 0); walker.scale = { L: 1, R: 1 }; walker.liftScale = 1; walker.cycle = cur;
-    applyPose(walking ? walker.pose() : Gait.standPose(0));
+    $('dims').textContent = 'Body ' + (2 * d.halfLx).toFixed(0) + ' × ' + (2 * d.halfLy).toFixed(0) + ' mm · ' +
+      (p.style === 'wheg' ? 'belly clears ' + d.minClear.toFixed(0) + ' mm' : 'stands ' + d.standH.toFixed(0) + ' mm tall');
+    $('walk').textContent = walking ? (p.style === 'wheg' ? 'Driving' : 'Walking') : (p.style === 'wheg' ? 'Parked' : 'Standing');
   }
+  function standPoseNow() { return p.style === 'hex' ? Gait.hexStandPose(0) : Gait.standPose(0); }
   function applyPose(pose) {
-    M.LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       legG[l].rotation.z = (d.heading[l] + M.YAW_SIGN[l] * pose[l + '_hip']) * DEG;
       kneeG[l].rotation.y = -pose[l + '_knee'] * DEG;
     });
   }
+  // wheg: spin each hub (rear pair is offset half a spoke so the body does not bounce as hard), then rest the body on the highest wheel
+  function applyWheels(angles, settle) {
+    Gait.LEGS.forEach(function (l) {
+      var th = (angles[l] + (M.HIP_SX[l] < 0 ? d.pitch / 2 : 0)) * DEG;
+      spinG[l].rotation.z = (M.HIP_SY[l] > 0 ? 1 : -1) * th;
+    });
+    robot.position.z = 0; robot.updateMatrixWorld(true);
+    var need = -Infinity, v = new THREE.Vector3();
+    Gait.LEGS.forEach(function (l) {
+      var low = Infinity;
+      for (var i = 0; i < d.n; i++) {
+        var a = i * d.pitch * DEG;
+        v.set(d.padCenterR * Math.cos(a), d.padCenterR * Math.sin(a), d.hubY0 + d.padW / 2);
+        spinG[l].localToWorld(v);
+        low = Math.min(low, v.z - d.padD / 2);
+      }
+      need = Math.max(need, -low);
+    });
+    robot.position.z = need;
+  }
   function stanceX(pose) {
     var s = 0, n = 0;
-    M.LEGS.forEach(function (l) { if (pose[l + '_knee'] <= 1) { s += M.legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee'])[0]; n++; } });
+    d.legs.forEach(function (l) { if (pose[l + '_knee'] <= 1) { s += M.legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee'])[0]; n++; } });
     return n ? s / n : null;
   }
 
@@ -2546,9 +3003,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     edge.position.set(p.bed / 2, p.bed / 2, 0); plateGroup.add(edge);
     pl.items.forEach(function (it) {
       var g = new THREE.Group(); g.position.set(it.x, it.y, 0); plateGroup.add(g);
-      it.obj.parts.forEach(function (pt) {
-        g.add(new THREE.Mesh(G.toBufferGeometry(pt.shells), mat(p.ams[Math.min(4, Math.max(1, pt.slot)) - 1].hex)));
-      });
+      it.obj.parts.forEach(function (pt) { g.add(new THREE.Mesh(G.toBufferGeometry(pt.shells), mat(p.ams[Math.min(4, Math.max(1, pt.slot)) - 1].hex))); });
     });
     var pp = $('platepick'); pp.innerHTML = '';
     if (plates.length > 1) {
@@ -2562,10 +3017,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   var camTargets = {
-    angle: function () { return { t: [0, 0, d.standH * 0.45], pos: [330, -400, 290] }; },
-    top: function () { return { t: [0, 0, d.standH * 0.4], pos: [0.01, -1, 560] }; },
-    side: function () { return { t: [0, 0, d.standH * 0.5], pos: [0, -540, d.standH * 0.6] }; },
-    front: function () { return { t: [0, 0, d.standH * 0.5], pos: [560, 0, d.standH * 0.6] }; },
+    angle: function () { var k = Math.max(1, d.halfLy / 62); return { t: [0, 0, d.standH * 0.45], pos: [330 * k, -400 * k, 290 * k] }; },
+    top: function () { return { t: [0, 0, d.standH * 0.4], pos: [0.01, -1, 560 * Math.max(1, d.halfLy / 62)] }; },
+    side: function () { return { t: [0, 0, d.standH * 0.5], pos: [0, -540 * Math.max(1, d.halfLy / 62), d.standH * 0.6] }; },
+    front: function () { return { t: [0, 0, d.standH * 0.5], pos: [560 * Math.max(1, d.halfLy / 62), 0, d.standH * 0.6] }; },
     plates: function () { return { t: [p.bed / 2, p.bed / 2, 0], pos: [p.bed / 2, p.bed / 2 - 150, p.bed * 1.15] }; }
   };
   function setCamera(name) {
@@ -2573,7 +3028,6 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     var c = camTargets[name]();
     camera.position.set(c.pos[0], c.pos[1], c.pos[2]); controls.target.set(c.t[0], c.t[1], c.t[2]); controls.update();
   }
-
   function setMode(m) {
     mode = m;
     robot.visible = m === 'robot'; floor.visible = m === 'robot'; plateGroup.visible = m === 'plates';
@@ -2589,8 +3043,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     setCamera(camName);
   });
   $('walk').addEventListener('click', function () {
-    walking = !walking; this.textContent = walking ? 'Walking' : 'Standing'; this.classList.toggle('on', walking); this.setAttribute('aria-pressed', walking);
-    prevStanceX = null; if (!walking && legG.FL) applyPose(Gait.standPose(0));
+    walking = !walking; this.classList.toggle('on', walking); this.setAttribute('aria-pressed', walking);
+    this.textContent = walking ? (p.style === 'wheg' ? 'Driving' : 'Walking') : (p.style === 'wheg' ? 'Parked' : 'Standing');
+    prevStanceX = null; if (!walking && legG && d.legs && p.style !== 'wheg') applyPose(standPoseNow());
   });
   $('ghost').addEventListener('click', function () {
     ghostOn = !ghostOn; this.textContent = ghostOn ? 'Motors shown' : 'Motors hidden'; this.classList.toggle('on', ghostOn); this.setAttribute('aria-pressed', ghostOn);
@@ -2602,17 +3057,22 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     requestAnimationFrame(frame);
     if (!renderer || document.hidden) return;
     var dt = Math.min(0.05, (t - lastT) / 1000 || 0); lastT = t;
-    if (mode === 'robot' && walking && walker && legG.FL) {
-      var pose = walker.update(dt); applyPose(pose);
-      var sx = stanceX(pose);
-      if (sx !== null && prevStanceX !== null) { floorX += sx - prevStanceX; floor.position.x = ((floorX % 20) + 20) % 20; }
-      prevStanceX = sx;
+    if (mode === 'robot' && walking && walker && walker.style === p.style) {
+      if (p.style === 'wheg') {
+        var sp = walker.update(dt); applyWheels(walker.angle);
+        var v = sp.FL * walker.rpmFull / 60 * 2 * Math.PI * 0.8 * d.R * dt;          // mm the ground slides back
+        floorX -= v; floor.position.x = ((floorX % 20) + 20) % 20;
+      } else if (legG.FL) {
+        var pose = walker.update(dt); applyPose(pose);
+        var sx = stanceX(pose);
+        if (sx !== null && prevStanceX !== null) { floorX += sx - prevStanceX; floor.position.x = ((floorX % 20) + 20) % 20; }
+        prevStanceX = sx;
+      }
     }
     controls.update(); renderer.render(scene, camera);
   }
 
   // ------------------------------------------------------------------ refresh
-  var levelText = { ok: 'All good', warn: 'warning', bad: 'problem' };
   function renderChecks(ul, list) {
     ul.innerHTML = '';
     list.forEach(function (c) {
@@ -2620,34 +3080,30 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     });
   }
   function updateUI() {
+    Array.prototype.forEach.call(stylesEl.querySelectorAll('.stylecard'), function (b) { b.setAttribute('aria-checked', b.dataset.style === p.style ? 'true' : 'false'); });
     Object.keys(outputs).forEach(function (k) {
       var o = outputs[k], v = p[k], dec = o.step < 1 ? 1 : 0;
-      o.inp.value = v; o.out.textContent = v.toFixed(dec) + ' ' + o.unit;
+      o.inp.value = v; o.out.textContent = (v * o.mult).toFixed(dec) + (o.unit ? ' ' + o.unit : '');
     });
     Object.keys(fieldInputs).forEach(function (path) { var v = getPath(p, path); if (document.activeElement !== fieldInputs[path]) fieldInputs[path].value = v; });
     if (document.activeElement !== $('rname')) $('rname').value = p.name;
     $('batpreset').value = p.batteryPreset;
-    for (var i = 0; i < 4; i++) {
-      $('slotchip' + i).style.background = p.ams[i].hex; $('slotname' + i).textContent = 'Slot ' + (i + 1) + ': ' + p.ams[i].name;
-    }
-    Array.prototype.forEach.call(document.querySelectorAll('.sw'), function (b) {
-      b.setAttribute('aria-pressed', p.ams[+b.dataset.slot].hex === b.dataset.hex ? 'true' : 'false');
-    });
+    for (var i = 0; i < 4; i++) { $('slotchip' + i).style.background = p.ams[i].hex; $('slotname' + i).textContent = 'Slot ' + (i + 1) + ': ' + p.ams[i].name; }
+    Array.prototype.forEach.call(document.querySelectorAll('.sw'), function (b) { b.setAttribute('aria-pressed', p.ams[+b.dataset.slot].hex === b.dataset.hex ? 'true' : 'false'); });
     function opts(sel, withSame) {
       sel.innerHTML = '';
       if (withSame) sel.appendChild(el('option', { value: 0, text: 'Same as its leg' }));
       for (var j = 0; j < 4; j++) sel.appendChild(el('option', { value: j + 1, text: 'Slot ' + (j + 1) + ' – ' + p.ams[j].name }));
     }
-    ['body', 'trim', 'FL', 'FR', 'RL', 'RR'].forEach(function (k) { var s = $('as-' + k); opts(s, false); s.value = p.slots[k]; });
+    ['body', 'trim'].concat(M.STYLE_INFO[p.style].legs).forEach(function (k) { var s = $('as-' + k); opts(s, false); s.value = p.slots[k]; });
     var fs = $('as-feet'); opts(fs, true); fs.value = p.slots.feet || 0;
 
-    var st = $('status'), n = { warn: 0, bad: 0 };
+    var stt = $('status'), n = { warn: 0, bad: 0 };
     an.checks.forEach(function (c) { if (c.level !== 'ok') n[c.level]++; });
-    st.className = 'status ' + an.worst;
-    st.innerHTML = '';
-    st.appendChild(el('span', { class: 'dot ' + an.worst }));
-    st.appendChild(el('span', { text: an.worst === 'ok' ? 'All checks green' : an.worst === 'warn' ? n.warn + ' to look at' : n.bad + ' to fix' }));
-    TABS.forEach(function (t) {
+    stt.className = 'status ' + an.worst; stt.innerHTML = '';
+    stt.appendChild(el('span', { class: 'dot ' + an.worst }));
+    stt.appendChild(el('span', { text: an.worst === 'ok' ? 'All checks green' : an.worst === 'warn' ? n.warn + ' to look at' : n.bad + ' to fix' }));
+    tabList.forEach(function (t) {
       var lv = 'ok', list = an.checks.filter(function (c) { return t.checks.indexOf(c.id) >= 0; });
       list.forEach(function (c) { if (c.level === 'bad') lv = 'bad'; else if (c.level === 'warn' && lv !== 'bad') lv = 'warn'; });
       var dot = $('tabdot-' + t.id); dot.className = 'dot ' + lv; dot.hidden = lv === 'ok' || !t.checks.length;
@@ -2661,7 +3117,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     [[an.plates.length, 'print plates'], [an.grams.toFixed(0) + ' g', 'plastic'], ['~' + hours + ' h', 'print time (rough)'], [objs.length, 'pieces']].forEach(function (s) {
       fs.appendChild(el('div', { class: 'stat' }, [el('b', { text: String(s[0]) }), el('span', { text: s[1] })]));
     });
-    $('fwnums').textContent = 'GAIT_STRIDE_DEG = ' + p.stride + '\nGAIT_LIFT_DEG = ' + p.lift + '\nGAIT_PERIOD_S = ' + p.period + '\nGAIT_SWAY_DEG = ' + p.sway + '\nGAIT_SPLAY_DEG = ' + p.legSplay;
+    $('fwnums').textContent = X.settingsText(p).trim();
     var bad = an.worst === 'bad'; $('make').disabled = bad;
     $('makenote').textContent = bad ? 'Fix the red items first. They stop the robot from working.' : an.worst === 'warn' ? 'You can still print. Yellow items are worth a look first.' : 'The zip has one print file per plate, your settings, and a read-me.';
   }
@@ -2689,37 +3145,51 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }).catch(function (e) { if (!e || e.code !== 'declined') toast('Could not save the file. ' + ((e && e.message) || '')); });
   }
   function slug() { return (p.name || 'walker').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'walker'; }
-  $('make').addEventListener('click', function () {
-    var b = this; b.disabled = true; b.textContent = 'Making files...';
+  function makeFiles() {
+    var b = $('make'); b.disabled = true; b.textContent = 'Making files...';
     X.buildZip(JSZip, M, p, { settings: true }).then(function (bytes) { return saveFile(slug() + '-print-files.zip', bytes, 'application/zip'); })
       .catch(function (e) { toast('Something went wrong making the files: ' + e.message); })
       .then(function () { b.textContent = 'Make my print files'; b.disabled = an.worst === 'bad'; });
-  });
-  $('savejson').addEventListener('click', function () { saveFile(slug() + '-design.json', JSON.stringify({ app: 'Walker Designer', version: 1, params: p }, null, 1), 'application/json'); });
-  $('loadjson').addEventListener('change', function () {
-    var f = this.files && this.files[0]; if (!f) return; var r = new FileReader();
+  }
+  function loadFile() {
+    var f = this.files && this.files[0]; if (!f) return; var r = new FileReader(), inp = this;
     r.onload = function () {
-      try { var j = JSON.parse(r.result); adopt(j.params || j); changed(true); toast('Opened ' + (p.name || 'design')); } catch (e) { toast('That file is not a Walker design.'); }
+      try {
+        var j = JSON.parse(r.result), np = fromSaved(j.params || j);
+        designs[p.style] = p; p = np; designs[p.style] = p;
+        buildPanel(); buildPresets(); changed(true); toast('Opened ' + (p.name || 'design'));
+      } catch (e) { toast('That file is not a Walker design.'); }
     };
-    r.readAsText(f); this.value = '';
-  });
+    r.readAsText(f); inp.value = '';
+  }
   var resetArmed = false;
-  $('reset').addEventListener('click', function () {
-    if (!resetArmed) { resetArmed = true; this.textContent = 'Tap again to erase changes'; var b = this; setTimeout(function () { resetArmed = false; b.textContent = 'Start over'; }, 3500); return; }
-    resetArmed = false; this.textContent = 'Start over'; p = M.defaults(); changed(true);
-  });
+  function resetClick() {
+    var b = $('reset');
+    if (!resetArmed) { resetArmed = true; b.textContent = 'Tap again to erase changes'; setTimeout(function () { resetArmed = false; if ($('reset')) $('reset').textContent = 'Start over'; }, 3500); return; }
+    resetArmed = false; b.textContent = 'Start over'; var nm = p.name; p = M.styleDefaults(p.style); p.name = nm; changed(true);
+  }
 
   // ------------------------------------------------------------------ go
   var ok = initScene();
-  showTab('shape');
+  buildPanel(); buildPresets();
   rebuild();
   if (ok) { setMode('robot'); requestAnimationFrame(frame); }
   window.WDApp = {
     get p() { return p; }, get an() { return an; }, get d() { return d; }, set: function (k, v) { p[k] = v; rebuild(); },
+    setStyle: function (st) { switchStyle(st); rebuild(); },
     rebuild: rebuild, showTab: showTab, setMode: setMode, applyPose: applyPose,
     footWorld: function (leg) {
       robot.updateMatrixWorld(true);
       return kneeG[leg].localToWorld(new THREE.Vector3(d.Qu - d.a, d.vFc, d.footBot - d.Kw)).toArray();
+    },
+    setWheel: function (angles) { applyWheels(angles); },
+    wheelTips: function (leg) {
+      robot.updateMatrixWorld(true); var out = [];
+      for (var i = 0; i < d.n; i++) {
+        var a = i * d.pitch * DEG, v = new THREE.Vector3(d.padCenterR * Math.cos(a), d.padCenterR * Math.sin(a), d.hubY0 + d.padW / 2);
+        out.push(spinG[leg].localToWorld(v).toArray());
+      }
+      return out;
     }
   };
 })();
