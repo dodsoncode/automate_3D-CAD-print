@@ -70,8 +70,15 @@ header.top { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center
 .chip:hover { border-color: var(--sky); }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 
+.styles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.stylecard { text-align: left; display: grid; gap: 2px; background: var(--surface); border: 2px solid var(--line); border-radius: 14px; padding: 10px 14px; min-width: 0; }
+.stylecard b { font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; }
+.stylecard .sub { font-family: var(--font-mono); font-size: 0.78rem; color: var(--sky); }
+.stylecard .blurb { font-size: 0.88rem; color: var(--muted); }
+.stylecard:hover { border-color: var(--sky); }
+.stylecard[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .main { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.9fr); gap: 16px; align-items: start; }
-.stage { position: sticky; top: 10px; background: var(--view-bg); border: 2px solid var(--line); border-radius: 18px; overflow: hidden; height: calc(100vh - 120px); min-height: 380px; max-height: 760px; }
+.stage { position: sticky; top: 10px; background: var(--view-bg); border: 2px solid var(--line); border-radius: 18px; overflow: hidden; height: min(760px, calc(100vh - 20px)); min-height: 380px; }
 #view { position: absolute; inset: 0; }
 #view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .stage .bar { position: absolute; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; }
@@ -103,6 +110,7 @@ header.top { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
 .tabs .dot { width: 12px; height: 12px; font-size: 9px; }
 section.tab { padding: 14px 16px 18px; display: grid; gap: 14px; }
+[hidden] { display: none !important; }
 section.tab[hidden] { display: none; }
 .intro { color: var(--muted); margin: 0; font-size: 0.95rem; }
 .row { display: grid; gap: 4px; }
@@ -159,6 +167,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     </div>
     <div class="presets" id="presets"><span class="lbl">Start from</span></div>
   </header>
+  <div class="styles" id="styles" role="radiogroup" aria-label="Robot style"></div>
 
   <div class="main">
     <div class="stage" id="stage">
@@ -186,12 +195,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
 
     <div class="panel">
       <div class="tabs" role="tablist" id="tabs"></div>
-      <section class="tab" id="tab-shape" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-legs" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-walk" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-colors" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-parts" role="tabpanel" hidden></section>
-      <section class="tab" id="tab-finish" role="tabpanel" hidden></section>
+      <div id="secs"></div>
     </div>
   </div>
 </div>
@@ -202,14 +206,15 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
 <script src="vendor/jszip.min.js"></script>
 <script src="js/gait.js"></script>
 <script src="js/geom.js"></script>
+<script src="js/wheg.js"></script>
 <script src="js/model.js"></script>
 <script src="js/export3mf.js"></script>
 <script>
 (function () {
   'use strict';
   var M = WD.model, G = WD.geom, Gait = WD.gait, X = WD.export3mf, DEG = Math.PI / 180;
-  var STORE = 'walker-designer-v1';
-  var p = M.defaults(), d, parts, objs, an;
+  var STORE = 'walker-designer-v2';
+  var designs = {}, p = M.styleDefaults('crab'), d, parts, objs, an;
   var $ = function (id) { return document.getElementById(id); };
   function el(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -222,8 +227,11 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
   function getPath(o, path) { return path.split('.').reduce(function (a, k) { return a[k]; }, o); }
   function setPath(o, path, v) { var ks = path.split('.'), last = ks.pop(); ks.reduce(function (a, k) { return a[k]; }, o)[last] = v; }
 
-  // ------------------------------------------------------------------ saved design
-  function save() { try { localStorage.setItem(STORE, JSON.stringify(p)); } catch (e) {} }
+  // ------------------------------------------------------------------ saved designs (one per style)
+  function save() {
+    designs[p.style] = p;
+    try { localStorage.setItem(STORE, JSON.stringify({ style: p.style, designs: designs })); } catch (e) {}
+  }
   function mergeInto(base, src) {
     Object.keys(src || {}).forEach(function (k) {
       if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k]) && base[k] && typeof base[k] === 'object') mergeInto(base[k], src[k]);
@@ -232,38 +240,66 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     });
     return base;
   }
-  function adopt(src) { p = M.clampParams(mergeInto(M.defaults(), src)); }
-  try { var raw = localStorage.getItem(STORE); if (raw) adopt(JSON.parse(raw)); } catch (e) { p = M.defaults(); }
+  function fromSaved(src) {
+    var st = M.STYLES.indexOf(src && src.style) >= 0 ? src.style : 'crab';
+    return M.clampParams(mergeInto(M.styleDefaults(st), src || {}));
+  }
+  try {
+    var raw = localStorage.getItem(STORE);
+    if (raw) {
+      var st0 = JSON.parse(raw);
+      Object.keys(st0.designs || {}).forEach(function (k) { designs[k] = fromSaved(st0.designs[k]); });
+      p = designs[st0.style] || p;
+    }
+  } catch (e) { designs = {}; p = M.styleDefaults('crab'); }
 
-  // ------------------------------------------------------------------ control definitions (kid words)
-  var TABS = [
-    { id: 'shape', name: 'Body', checks: ['corners', 'bed', 'floor'] },
-    { id: 'legs', name: 'Legs', checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
-    { id: 'walk', name: 'Walking', checks: ['stable', 'hiprange'] },
-    { id: 'colors', name: 'Colors', checks: [] },
-    { id: 'parts', name: 'My parts', checks: [] },
-    { id: 'finish', name: 'Finish', checks: [] }
+  // ------------------------------------------------------------------ control definitions (kid words), per style
+  var LEG_NAMES = { FL: 'Front-left', FR: 'Front-right', ML: 'Middle-left', MR: 'Middle-right', RL: 'Back-left', RR: 'Back-right' };
+  var BODY_SLIDERS = [
+    { k: 'extraLength', label: 'Longer body', unit: 'mm', hint: 'Adds room front to back.' },
+    { k: 'extraWidth', label: 'Wider body', unit: 'mm', hint: 'Adds room side to side.' },
+    { k: 'cornerRadius', label: 'Round corners', unit: 'mm', hint: 'Bigger numbers make softer corners (limited by where the motors sit).' }
   ];
-  var SLIDERS = {
-    shape: [
-      { k: 'extraLength', label: 'Longer body', unit: 'mm', hint: 'Adds room front to back.' },
-      { k: 'extraWidth', label: 'Wider body', unit: 'mm', hint: 'Adds room side to side.' },
-      { k: 'cornerRadius', label: 'Round corners', unit: 'mm', hint: 'Bigger numbers make softer corners (limited by where the motors sit).' }
+  var LEG_SLIDERS = [
+    { k: 'coxaLen', label: 'Upper leg length', unit: 'mm', hint: 'The part from the hip motor out to the knee motor.' },
+    { k: 'femurLen', label: 'Lower leg length', unit: 'mm', hint: 'Longer legs make a taller robot.' },
+    { k: 'stanceAngle', label: 'Lower leg slope', unit: '°', hint: 'How far the lower leg tilts down from level.' },
+    { k: 'legSplay', label: 'Point legs outward', unit: '°', hint: 'Small = legs point to the front and back. Big = legs point to the sides.' },
+    { k: 'legWidth', label: 'Leg width', unit: 'mm', hint: 'Wider legs are stronger.' },
+    { k: 'legThick', label: 'Leg thickness', unit: 'mm', hint: 'Thicker legs are stronger and heavier.' },
+    { k: 'footSize', label: 'Foot size', unit: 'mm', hint: 'Bigger feet keep the robot from tipping.' }
+  ];
+  var WALK = [
+    { k: 'stride', label: 'Step size', unit: '°', hint: 'How far each foot swings forward and back.' },
+    { k: 'lift', label: 'How high feet lift', unit: '°', hint: 'Bigger lifts clear bumps but make the robot wobble more.' },
+    { k: 'period', label: 'Time for one full walk cycle', unit: 's', hint: 'Smaller = faster walker.' }
+  ];
+  var SWAY = { k: 'sway', label: 'Lean over standing legs', unit: '°', hint: 'Shifts weight onto the three feet that stay down. Helps a lot.' };
+  var PANEL = {
+    crab: [
+      { id: 'shape', name: 'Body', intro: 'The body holds the brain, battery and four hip motors. Make it bigger to fit more.', sliders: BODY_SLIDERS, checks: ['corners', 'bed', 'floor'] },
+      { id: 'legs', name: 'Legs', intro: 'Each leg has a hip motor and a knee motor. All four legs are printed the same.', sliders: LEG_SLIDERS, checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
+      { id: 'walk', name: 'Walking', intro: 'Try changes while the robot walks. These numbers also go into the walking code.', sliders: WALK.concat([SWAY]), checks: ['stable', 'hiprange'] }
     ],
-    legs: [
-      { k: 'coxaLen', label: 'Upper leg length', unit: 'mm', hint: 'The part from the hip motor out to the knee motor.' },
-      { k: 'femurLen', label: 'Lower leg length', unit: 'mm', hint: 'Longer legs make a taller robot.' },
-      { k: 'stanceAngle', label: 'Lower leg slope', unit: '°', hint: 'How far the lower leg tilts down from level.' },
-      { k: 'legSplay', label: 'Point legs outward', unit: '°', hint: 'Small = legs point to the front and back. Big = legs point to the sides.' },
-      { k: 'legWidth', label: 'Leg width', unit: 'mm', hint: 'Wider legs are stronger.' },
-      { k: 'legThick', label: 'Leg thickness', unit: 'mm', hint: 'Thicker legs are stronger and heavier.' },
-      { k: 'footSize', label: 'Foot size', unit: 'mm', hint: 'Bigger feet keep the robot from tipping.' }
+    hex: [
+      { id: 'shape', name: 'Body', intro: 'The body holds the brain, battery and six hip motors. The middle motors sit beside the battery, so it is wider than the crab.', sliders: BODY_SLIDERS, checks: ['corners', 'bed', 'floor'] },
+      { id: 'legs', name: 'Legs', intro: 'Six legs, all printed the same. Shorter lower legs put less strain on the motors.', sliders: LEG_SLIDERS, checks: ['muscle', 'thin', 'feet', 'foot', 'height'] },
+      { id: 'walk', name: 'Walking', intro: 'Three legs step while three stand, then they swap. That keeps it steady without leaning.', sliders: WALK, checks: ['stable', 'hiprange'] }
     ],
-    walk: [
-      { k: 'stride', label: 'Step size', unit: '°', hint: 'How far each foot swings forward and back.' },
-      { k: 'lift', label: 'How high feet lift', unit: '°', hint: 'Bigger lifts clear bumps but make the robot wobble more.' },
-      { k: 'period', label: 'Time for 4 steps', unit: 's', hint: 'Smaller = faster walker.' },
-      { k: 'sway', label: 'Lean over standing legs', unit: '°', hint: 'Shifts weight onto the three feet that stay down. Helps a lot.' }
+    wheg: [
+      { id: 'shape', name: 'Body', intro: 'The body is a tray with two walls that hold the four spin motors. A longer body leaves room for bigger spokes.',
+        sliders: [BODY_SLIDERS[0], BODY_SLIDERS[1]], checks: ['floor', 'bed'] },
+      { id: 'legs', name: 'Windmill legs', intro: 'Each leg is a hub with spokes that spins all the way round. The spokes grab and lift the robot over bumps. All four are printed the same.', sliders: [
+        { k: 'spokeLen', label: 'Spoke length', unit: 'mm', hint: 'Longer spokes climb bigger bumps but need stronger motors and a longer body.' },
+        { k: 'spokeCount', label: 'Number of spokes', unit: '', hint: 'More spokes ride smoother. Fewer spokes grab harder.' },
+        { k: 'legWidth', label: 'Spoke width', unit: 'mm', hint: 'Wider spokes are stronger.' },
+        { k: 'legThick', label: 'Spoke thickness', unit: 'mm', hint: 'Thicker spokes are stronger and heavier.' },
+        { k: 'padSize', label: 'Tip pad size', unit: 'mm', hint: 'The round pad at the end of every spoke.' },
+        { k: 'padWidth', label: 'Tip pad width', unit: 'mm', hint: 'Wide pads grip better and stop the robot sinking in soft ground.' }
+      ], checks: ['wheelgap', 'height', 'thin', 'foot'] },
+      { id: 'walk', name: 'Driving', intro: 'Spin motors turn all the way round, so there is no step size. Pick how fast they go.', sliders: [
+        { k: 'maxThrottle', label: 'Top speed', unit: '%', mult: 100, hint: 'Start low. These motors are fast and the robot can flip over bumps.' }
+      ], checks: ['speed', 'muscle', 'stable'] }
     ]
   };
   var BATTERY_FIELDS = [['battery.L', 'Battery holder length (mm)'], ['battery.W', 'Width (mm)'], ['battery.H', 'Height (mm)'], ['battery.mass', 'Weight with batteries (g)']];
@@ -275,34 +311,15 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
   var SWATCHES = [['Sky blue', '#3aa7ff'], ['Blue', '#1f4fd8'], ['Teal', '#14b8a6'], ['Lime', '#7ed321'], ['Green', '#1f9d55'], ['Yellow', '#ffd23f'],
                   ['Orange', '#ff8a1f'], ['Red', '#e5383b'], ['Pink', '#ff5fa2'], ['Purple', '#8a4fd8'], ['White', '#f4f4f0'], ['Black', '#262a33']];
 
-  // ------------------------------------------------------------------ build panel
-  var tabsEl = $('tabs');
-  TABS.forEach(function (t) {
-    var b = el('button', { type: 'button', role: 'tab', id: 'tabbtn-' + t.id, 'aria-controls': 'tab-' + t.id, 'aria-selected': 'false' });
-    b.appendChild(el('span', { text: t.name }));
-    b.appendChild(el('span', { class: 'dot ok', id: 'tabdot-' + t.id, hidden: '' }));
-    b.addEventListener('click', function () { showTab(t.id); });
-    tabsEl.appendChild(b);
-  });
-  var curTab = 'shape';
-  function showTab(id) {
-    curTab = id;
-    TABS.forEach(function (t) {
-      $('tab-' + t.id).hidden = t.id !== id;
-      $('tabbtn-' + t.id).setAttribute('aria-selected', t.id === id ? 'true' : 'false');
-    });
-    if (id === 'finish') renderFinish();
-  }
-
-  var outputs = {};
+  // ------------------------------------------------------------------ panel (rebuilt when the style changes)
+  var tabsEl = $('tabs'), secs = $('secs'), outputs = {}, fieldInputs = {}, curTab = 'shape', tabList = [];
   function sliderRow(def) {
-    var r = M.RANGES[def.k], id = 'sl-' + def.k, out = el('output', { for: id });
+    var r = M.RANGES[def.k], id = 'sl-' + def.k, mult = def.mult || 1, out = el('output', { for: id });
     var inp = el('input', { type: 'range', id: id, min: r[0], max: r[1], step: r[2] });
     inp.addEventListener('input', function () { p[def.k] = parseFloat(inp.value); changed(); });
-    outputs[def.k] = { inp: inp, out: out, unit: def.unit, step: r[2] };
+    outputs[def.k] = { inp: inp, out: out, unit: def.unit, step: r[2] * mult, mult: mult };
     return el('div', { class: 'row' }, [
-      el('div', { class: 'head' }, [el('label', { for: id, text: def.label }), out]),
-      inp, el('div', { class: 'hint', text: def.hint })]);
+      el('div', { class: 'head' }, [el('label', { for: id, text: def.label }), out]), inp, el('div', { class: 'hint', text: def.hint })]);
   }
   function numField(path, label, step) {
     var id = 'f-' + path.replace('.', '-'), inp = el('input', { type: 'number', id: id, step: step || 0.1, min: 0, inputmode: 'decimal' });
@@ -315,24 +332,43 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     fieldInputs[path] = inp;
     return el('div', { class: 'field' }, [el('label', { for: id, text: label }), inp]);
   }
-  var fieldInputs = {};
-
   function checksBox(tabId) { return el('div', { class: 'tabchecks', id: 'tc-' + tabId }, [el('h3', { text: 'Checks for this page' }), el('ul', { class: 'checks' })]); }
 
-  ['shape', 'legs', 'walk'].forEach(function (id) {
-    var sec = $('tab-' + id);
-    var intro = { shape: 'The body holds the brain, battery and four hip motors. Make it bigger to fit more.',
-                  legs: 'Each leg has a hip motor and a knee motor. All four legs are printed the same.',
-                  walk: 'Try changes while the robot walks. These numbers also go into the walking code.' }[id];
-    sec.appendChild(el('p', { class: 'intro', text: intro }));
-    SLIDERS[id].forEach(function (def) { sec.appendChild(sliderRow(def)); });
-    sec.appendChild(checksBox(id));
-  });
+  function buildPanel() {
+    var st = p.style, info = M.STYLE_INFO[st], spec = PANEL[st];
+    tabsEl.innerHTML = ''; secs.innerHTML = ''; outputs = {}; fieldInputs = {};
+    tabList = spec.map(function (t) { return { id: t.id, name: t.name, checks: t.checks }; })
+      .concat([{ id: 'colors', name: 'Colors', checks: [] }, { id: 'parts', name: 'My parts', checks: [] }, { id: 'finish', name: 'Finish', checks: [] }]);
+    tabList.forEach(function (t) {
+      var b = el('button', { type: 'button', role: 'tab', id: 'tabbtn-' + t.id, 'aria-controls': 'tab-' + t.id, 'aria-selected': 'false' });
+      b.appendChild(el('span', { text: t.name }));
+      b.appendChild(el('span', { class: 'dot ok', id: 'tabdot-' + t.id, hidden: '' }));
+      b.addEventListener('click', function () { showTab(t.id); });
+      tabsEl.appendChild(b);
+      secs.appendChild(el('section', { class: 'tab', id: 'tab-' + t.id, role: 'tabpanel', hidden: '' }));
+    });
+    spec.forEach(function (t) {
+      var sec = $('tab-' + t.id);
+      sec.appendChild(el('p', { class: 'intro', text: t.intro }));
+      t.sliders.forEach(function (def) { sec.appendChild(sliderRow(def)); });
+      sec.appendChild(checksBox(t.id));
+    });
+    buildColors(info); buildParts(st); buildFinish(st);
+    if (!$('tab-' + curTab)) curTab = 'shape';
+    showTab(curTab);
+  }
+  function showTab(id) {
+    curTab = id;
+    tabList.forEach(function (t) {
+      $('tab-' + t.id).hidden = t.id !== id;
+      $('tabbtn-' + t.id).setAttribute('aria-selected', t.id === id ? 'true' : 'false');
+    });
+    if (id === 'finish') renderFinish();
+  }
 
-  // colors
-  (function () {
+  function buildColors(info) {
     var sec = $('tab-colors');
-    sec.appendChild(el('p', { class: 'intro', text: 'Your printer has 4 filament slots. Pick the color in each slot, then say which part uses which slot. Print parts that move against each other in different colors.' }));
+    sec.appendChild(el('p', { class: 'intro', text: 'Your printer has 4 filament slots. Pick the color in each slot, then say which part uses which slot. Parts that move against each other look best in different colors.' }));
     for (var i = 0; i < 4; i++) (function (i) {
       var sw = el('div', { class: 'swatches', role: 'group', 'aria-label': 'Slot ' + (i + 1) + ' color' });
       SWATCHES.forEach(function (c) {
@@ -344,44 +380,53 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
       sec.appendChild(el('div', { class: 'slotline' }, [
         el('div', { class: 'nm' }, [el('span', { class: 'chipc', id: 'slotchip' + i }), el('span', { id: 'slotname' + i })]), sw]));
     })(i);
-    var as = el('div', { class: 'assign' });
-    [['body', 'Body'], ['trim', 'Rubber-band hooks'], ['FL', 'Front-left leg'], ['FR', 'Front-right leg'], ['RL', 'Back-left leg'], ['RR', 'Back-right leg']].forEach(function (a) {
+    var as = el('div', { class: 'assign' }), wheg = p.style === 'wheg';
+    var rows = [['body', 'Body'], ['trim', 'Rubber-band hooks']].concat(info.legs.map(function (l) {
+      return [l, LEG_NAMES[l] + (wheg ? ' windmill leg' : ' leg')];
+    }));
+    rows.forEach(function (a) {
       var s = el('select', { id: 'as-' + a[0] });
       s.addEventListener('change', function () { p.slots[a[0]] = parseInt(s.value, 10); changed(); });
       as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-' + a[0], text: a[1] }), s]));
     });
     var fs = el('select', { id: 'as-feet' });
     fs.addEventListener('change', function () { p.slots.feet = parseInt(fs.value, 10); changed(); });
-    as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-feet', text: 'Feet' }), fs]));
+    as.appendChild(el('div', { class: 'field' }, [el('label', { for: 'as-feet', text: wheg ? 'Tip pads' : 'Feet' }), fs]));
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Which slot prints which part' }), as]));
-  })();
+  }
 
-  // my parts
-  (function () {
+  function buildParts(st) {
     var sec = $('tab-parts');
     sec.appendChild(el('p', { class: 'intro', text: 'The body is cut to fit your real parts. Measure yours with calipers and type the numbers in. The starting numbers are typical, not exact.' }));
     var bp = el('select', { id: 'batpreset' });
     Object.keys(M.BATTERY_PRESETS).forEach(function (k) { bp.appendChild(el('option', { value: k, text: M.BATTERY_PRESETS[k].label })); });
     bp.addEventListener('change', function () {
       p.batteryPreset = bp.value;
-      if (bp.value !== 'custom') p.battery = JSON.parse(JSON.stringify(M.BATTERY_PRESETS[bp.value])), delete p.battery.label;
+      if (bp.value !== 'custom') { p.battery = JSON.parse(JSON.stringify(M.BATTERY_PRESETS[bp.value])); delete p.battery.label; }
       changed();
     });
     var bf = el('div', { class: 'fields' }); BATTERY_FIELDS.forEach(function (f) { bf.appendChild(numField(f[0], f[1], 1)); });
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Battery holder' }), el('div', { class: 'field' }, [el('label', { for: 'batpreset', text: 'Which holder?' }), bp]), bf]));
+    var titles = { servo: st === 'wheg' ? 'Spin motors (continuous-rotation micro servos, FS90R size)' : 'Leg motors (9 g micro servos)', board: 'Control boards' };
     ['servo', 'board'].forEach(function (g) {
       var f = el('div', { class: 'fields' }); PART_FIELDS[g].forEach(function (x) { f.appendChild(numField(x[0], x[1] + ' (mm)', 0.1)); });
-      sec.appendChild(el('fieldset', {}, [el('legend', { text: g === 'servo' ? 'Leg motors (9 g micro servos)' : 'Control boards' }), f]));
+      var kids = [el('legend', { text: titles[g] }), f];
+      if (g === 'servo' && st === 'wheg') {
+        var f2 = el('div', { class: 'fields' });
+        f2.appendChild(numField('wheelServo.torque', 'Motor torque (kg-cm)', 0.1)); f2.appendChild(numField('wheelServo.mass', 'Motor weight (g)', 0.1));
+        f2.appendChild(numField('wheelServo.rpm', 'Top speed (rpm)', 1));
+        kids.push(f2);
+      }
+      sec.appendChild(el('fieldset', {}, kids));
     });
     var fx = el('div', { class: 'fields' });
     fx.appendChild(numField('clearance', 'Extra gap around parts (mm)', 0.05));
     fx.appendChild(numField('bed', 'Print bed size (mm)', 1));
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Printer fit' }), fx,
       el('p', { class: 'note', text: 'A larger gap makes parts slide in easily. A smaller gap grips tighter. 0.3 mm suits most printers.' })]));
-  })();
+  }
 
-  // finish
-  (function () {
+  function buildFinish(st) {
     var sec = $('tab-finish');
     sec.appendChild(el('p', { class: 'intro', text: 'When every light is green or yellow, make the print files. Open them in Bambu Studio, then send them to the printer.' }));
     sec.appendChild(el('div', { class: 'stats', id: 'fstats' }));
@@ -393,38 +438,63 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
       el('input', { type: 'file', id: 'loadjson', accept: '.json,application/json', hidden: '' }),
       el('button', { type: 'button', class: 'btn', id: 'reset', text: 'Start over' })]));
     sec.appendChild(el('p', { class: 'note', id: 'makenote' }));
-    sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Walking numbers for the robot code' }), el('pre', { class: 'code', id: 'fwnums' }),
-      el('p', { class: 'note', text: 'These match what you see walking here. They go in firmware/src/config.py, or into the MakeCode walker blocks.' })]));
+    sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Numbers for the robot code' }), el('pre', { class: 'code', id: 'fwnums' }),
+      el('p', { class: 'note', text: 'These match what you see here. They go in firmware/src/config.py, or into the MakeCode walker blocks.' })]));
+    var extra = st === 'wheg' ? [
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Set each spin motor to stop' }), el('span', { text: 'Continuous motors creep when they should be still. Turn the little trim screw until each one stops, with the wheels off.' })])])] : [];
     sec.appendChild(el('fieldset', {}, [el('legend', { text: 'Before you print' }), el('ul', { class: 'checks' }, [
-      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Print one leg first' }), el('span', { text: 'Check that a motor slides in snugly before you print everything. Nothing here has been test printed yet.' })])]),
-      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Measure your motors' }), el('span', { text: 'Use the My parts page if your motor is not exactly the starting size.' })])])])]));
-  })();
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Print one ' + (st === 'wheg' ? 'windmill leg' : 'leg') + ' first' }), el('span', { text: 'Check that a motor slides in snugly before you print everything. Nothing here has been test printed yet.' })])]),
+      el('li', {}, [el('span', { class: 'dot warn' }), el('div', {}, [el('b', { text: 'Measure your motors' }), el('span', { text: 'Use the My parts page if your motor is not exactly the starting size.' })])])].concat(extra))]));
+    $('make').addEventListener('click', makeFiles);
+    $('savejson').addEventListener('click', function () { saveFile(slug() + '-design.json', JSON.stringify({ app: 'Walker Designer', version: 2, params: p }, null, 1), 'application/json'); });
+    $('loadjson').addEventListener('change', loadFile);
+    $('reset').addEventListener('click', resetClick);
+  }
 
-  // ------------------------------------------------------------------ presets
-  var presetsEl = $('presets');
-  Object.keys(M.PRESETS).forEach(function (name) {
-    var b = el('button', { type: 'button', class: 'chip', text: name, 'aria-pressed': 'false' });
-    b.addEventListener('click', function () {
-      var keepAms = p.ams, keepSlots = p.slots, keepName = p.name;
-      p = M.defaults(); mergeInto(p, M.PRESETS[name]); p.ams = keepAms; p.slots = keepSlots; p.name = keepName;
-      M.clampParams(p); changed(true);
-      Array.prototype.forEach.call(presetsEl.querySelectorAll('.chip'), function (c) { c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); });
-    });
-    presetsEl.appendChild(b);
+  // ------------------------------------------------------------------ style cards + presets
+  var stylesEl = $('styles'), presetsEl = $('presets');
+  M.STYLES.forEach(function (st) {
+    var info = M.STYLE_INFO[st];
+    var b = el('button', { type: 'button', class: 'stylecard', role: 'radio', 'data-style': st, 'aria-checked': 'false' }, [
+      el('b', { text: info.name }), el('span', { class: 'sub', text: (st === 'wheg' ? '4 spinning legs' : info.legs.length + ' legs') + ' · ' + info.motors + ' motors' }),
+      el('span', { class: 'blurb', text: info.blurb })]);
+    b.addEventListener('click', function () { switchStyle(st); });
+    stylesEl.appendChild(b);
   });
+  function switchStyle(st) {
+    if (st === p.style) return;
+    designs[p.style] = p;
+    var keep = { name: p.name, ams: p.ams, slots: p.slots, bed: p.bed };
+    p = designs[st] || mergeInto(M.styleDefaults(st), { ams: keep.ams, slots: keep.slots, bed: keep.bed });
+    p.name = keep.name;
+    buildPanel(); buildPresets(); changed(true);
+  }
+  function buildPresets() {
+    presetsEl.innerHTML = ''; presetsEl.appendChild(el('span', { class: 'lbl', text: 'Start from' }));
+    var list = M.STYLE_PRESETS[p.style];
+    Object.keys(list).forEach(function (name) {
+      var b = el('button', { type: 'button', class: 'chip', text: name, 'aria-pressed': 'false' });
+      b.addEventListener('click', function () {
+        var keep = { name: p.name, ams: p.ams, slots: p.slots, style: p.style };
+        p = M.styleDefaults(keep.style); mergeInto(p, list[name]); p.ams = keep.ams; p.slots = keep.slots; p.name = keep.name;
+        M.clampParams(p); changed(true);
+        Array.prototype.forEach.call(presetsEl.querySelectorAll('.chip'), function (c) { c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); });
+      });
+      presetsEl.appendChild(b);
+    });
+  }
   $('rname').addEventListener('input', function () { p.name = this.value || 'My Walker'; save(); });
 
   // ------------------------------------------------------------------ 3D scene
   var scene, camera, renderer, controls, robot, plateGroup, floor, ghostOn = true, walking = true, mode = 'robot', plateIdx = 0;
-  var matCache = {}, legG = {}, kneeG = {}, ghosts = [], walker, lastT = 0, prevStanceX = null, floorX = 0, camName = 'angle';
+  var matCache = {}, legG = {}, kneeG = {}, spinG = {}, ghosts = [], walker, lastT = 0, prevStanceX = null, floorX = 0, camName = 'angle';
   function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
   function mat(hex) { return matCache[hex] || (matCache[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0.05 })); }
 
   function initScene() {
     var host = $('view');
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-    } catch (e) { $('nogl').hidden = false; return false; }
+    try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true }); }
+    catch (e) { $('nogl').hidden = false; return false; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     host.appendChild(renderer.domElement);
     scene = new THREE.Scene();
@@ -437,8 +507,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     robot = new THREE.Group(); scene.add(robot);
     plateGroup = new THREE.Group(); scene.add(plateGroup);
     floor = new THREE.Group(); scene.add(floor);
-    buildFloor();
-    resize();
+    buildFloor(); resize();
     if (window.ResizeObserver) new ResizeObserver(resize).observe($('stage')); else window.addEventListener('resize', resize);
     applyTheme();
     return true;
@@ -473,7 +542,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
   }
   function addParts(group, list, leg, shift, geoms) {
     list.forEach(function (pt, i) {
-      var key = leg + '|' + pt.name, geo = geoms && geoms[pt.name + i];
+      var geo = geoms && geoms[pt.name + i];
       if (!geo) { geo = G.toBufferGeometry(pt.shells); if (geoms) geoms[pt.name + i] = geo; }
       var m = new THREE.Mesh(geo, mat(p.ams[slotFor(pt.slotKey, leg) - 1].hex));
       m.userData.shared = !!geoms;
@@ -489,39 +558,74 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
   }
 
   function buildRobot() {
-    clearGroup(robot); legG = {}; kneeG = {}; ghosts = [];
-    robot.position.z = d.standH;
-    var hw = M.hardware(p, d);
-    var bodyG = new THREE.Group(); robot.add(bodyG);
+    clearGroup(robot); legG = {}; kneeG = {}; spinG = {}; ghosts = [];
+    var hw = M.hardware(p, d), bodyG = new THREE.Group(); robot.add(bodyG);
     addParts(bodyG, parts.body, 'body');
     hw.body.forEach(function (h) { bodyG.add(box(h)); });
-    var coxaGeo = {}, femGeo = {}, footGeo = {};
-    M.LEGS.forEach(function (l) {
-      var g = new THREE.Group(); g.position.set(d.hip[l][0], d.hip[l][1], 0); robot.add(g); legG[l] = g;
-      addParts(g, parts.coxa, l, null, coxaGeo);
-      hw.leg.forEach(function (h) { g.add(box(h)); });
-      var k = new THREE.Group(); k.position.set(d.a, 0, d.Kw); g.add(k); kneeG[l] = k;
-      addParts(k, parts.femur, l, [-d.a, 0, -d.Kw], femGeo);
-      addParts(k, parts.foot, l, [-d.a, 0, -d.Kw], footGeo);
-      hw.knee.forEach(function (h) { k.add(box(h)); });
-    });
+    var cur = walker ? walker.cycle || 0 : 0;
+    if (p.style === 'wheg') {
+      var wGeo = {};
+      Gait.LEGS.forEach(function (l) {
+        var sx = M.HIP_SX[l], sy = M.HIP_SY[l];
+        var g = new THREE.Group(); g.position.set(sx * d.axleX, 0, d.axleZ); robot.add(g);
+        var orient = new THREE.Group(); orient.rotation.x = sy > 0 ? -Math.PI / 2 : Math.PI / 2; g.add(orient);
+        var spin = new THREE.Group(); orient.add(spin); spinG[l] = spin;
+        addParts(spin, parts.wheg, l, null, wGeo);
+      });
+      walker = new Gait.WhegDrive(p.maxThrottle, p.wheelServo.rpm, 2.0); walker.command(1, 0); walker.style = 'wheg';
+      walker.scale = { L: 1, R: 1 };
+      applyWheels(walker.angle, true);
+    } else {
+      var coxaGeo = {}, femGeo = {}, footGeo = {};
+      d.legs.forEach(function (l) {
+        var g = new THREE.Group(); g.position.set(d.hip[l][0], d.hip[l][1], 0); robot.add(g); legG[l] = g;
+        addParts(g, parts.coxa, l, null, coxaGeo);
+        hw.leg.forEach(function (h) { g.add(box(h)); });
+        var k = new THREE.Group(); k.position.set(d.a, 0, d.Kw); g.add(k); kneeG[l] = k;
+        addParts(k, parts.femur, l, [-d.a, 0, -d.Kw], femGeo);
+        addParts(k, parts.foot, l, [-d.a, 0, -d.Kw], footGeo);
+        hw.knee.forEach(function (h) { k.add(box(h)); });
+      });
+      robot.position.z = d.standH;
+      walker = p.style === 'hex' ? new Gait.HexWalker(p.stride, p.lift, p.period, 2.0) : new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
+      walker.command(1, 0); walker.style = p.style; walker.scale = { L: 1, R: 1 }; walker.liftScale = 1; walker.cycle = cur;
+      applyPose(walking ? walker.pose() : standPoseNow());
+    }
     ghosts.forEach(function (m) { m.visible = ghostOn; });
-    var W = 2 * d.halfLx, L = 2 * d.halfLy;
-    $('dims').textContent = 'Body ' + W.toFixed(0) + ' × ' + L.toFixed(0) + ' mm · stands ' + d.standH.toFixed(0) + ' mm tall';
-    var cur = walker ? walker.cycle : 0;
-    walker = new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
-    walker.command(1, 0); walker.scale = { L: 1, R: 1 }; walker.liftScale = 1; walker.cycle = cur;
-    applyPose(walking ? walker.pose() : Gait.standPose(0));
+    $('dims').textContent = 'Body ' + (2 * d.halfLx).toFixed(0) + ' × ' + (2 * d.halfLy).toFixed(0) + ' mm · ' +
+      (p.style === 'wheg' ? 'belly clears ' + d.minClear.toFixed(0) + ' mm' : 'stands ' + d.standH.toFixed(0) + ' mm tall');
+    $('walk').textContent = walking ? (p.style === 'wheg' ? 'Driving' : 'Walking') : (p.style === 'wheg' ? 'Parked' : 'Standing');
   }
+  function standPoseNow() { return p.style === 'hex' ? Gait.hexStandPose(0) : Gait.standPose(0); }
   function applyPose(pose) {
-    M.LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       legG[l].rotation.z = (d.heading[l] + M.YAW_SIGN[l] * pose[l + '_hip']) * DEG;
       kneeG[l].rotation.y = -pose[l + '_knee'] * DEG;
     });
   }
+  // wheg: spin each hub (rear pair is offset half a spoke so the body does not bounce as hard), then rest the body on the highest wheel
+  function applyWheels(angles, settle) {
+    Gait.LEGS.forEach(function (l) {
+      var th = (angles[l] + (M.HIP_SX[l] < 0 ? d.pitch / 2 : 0)) * DEG;
+      spinG[l].rotation.z = (M.HIP_SY[l] > 0 ? 1 : -1) * th;
+    });
+    robot.position.z = 0; robot.updateMatrixWorld(true);
+    var need = -Infinity, v = new THREE.Vector3();
+    Gait.LEGS.forEach(function (l) {
+      var low = Infinity;
+      for (var i = 0; i < d.n; i++) {
+        var a = i * d.pitch * DEG;
+        v.set(d.padCenterR * Math.cos(a), d.padCenterR * Math.sin(a), d.hubY0 + d.padW / 2);
+        spinG[l].localToWorld(v);
+        low = Math.min(low, v.z - d.padD / 2);
+      }
+      need = Math.max(need, -low);
+    });
+    robot.position.z = need;
+  }
   function stanceX(pose) {
     var s = 0, n = 0;
-    M.LEGS.forEach(function (l) { if (pose[l + '_knee'] <= 1) { s += M.legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee'])[0]; n++; } });
+    d.legs.forEach(function (l) { if (pose[l + '_knee'] <= 1) { s += M.legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee'])[0]; n++; } });
     return n ? s / n : null;
   }
 
@@ -534,9 +638,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     edge.position.set(p.bed / 2, p.bed / 2, 0); plateGroup.add(edge);
     pl.items.forEach(function (it) {
       var g = new THREE.Group(); g.position.set(it.x, it.y, 0); plateGroup.add(g);
-      it.obj.parts.forEach(function (pt) {
-        g.add(new THREE.Mesh(G.toBufferGeometry(pt.shells), mat(p.ams[Math.min(4, Math.max(1, pt.slot)) - 1].hex)));
-      });
+      it.obj.parts.forEach(function (pt) { g.add(new THREE.Mesh(G.toBufferGeometry(pt.shells), mat(p.ams[Math.min(4, Math.max(1, pt.slot)) - 1].hex))); });
     });
     var pp = $('platepick'); pp.innerHTML = '';
     if (plates.length > 1) {
@@ -550,10 +652,10 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
   }
 
   var camTargets = {
-    angle: function () { return { t: [0, 0, d.standH * 0.45], pos: [330, -400, 290] }; },
-    top: function () { return { t: [0, 0, d.standH * 0.4], pos: [0.01, -1, 560] }; },
-    side: function () { return { t: [0, 0, d.standH * 0.5], pos: [0, -540, d.standH * 0.6] }; },
-    front: function () { return { t: [0, 0, d.standH * 0.5], pos: [560, 0, d.standH * 0.6] }; },
+    angle: function () { var k = Math.max(1, d.halfLy / 62); return { t: [0, 0, d.standH * 0.45], pos: [330 * k, -400 * k, 290 * k] }; },
+    top: function () { return { t: [0, 0, d.standH * 0.4], pos: [0.01, -1, 560 * Math.max(1, d.halfLy / 62)] }; },
+    side: function () { return { t: [0, 0, d.standH * 0.5], pos: [0, -540 * Math.max(1, d.halfLy / 62), d.standH * 0.6] }; },
+    front: function () { return { t: [0, 0, d.standH * 0.5], pos: [560 * Math.max(1, d.halfLy / 62), 0, d.standH * 0.6] }; },
     plates: function () { return { t: [p.bed / 2, p.bed / 2, 0], pos: [p.bed / 2, p.bed / 2 - 150, p.bed * 1.15] }; }
   };
   function setCamera(name) {
@@ -561,7 +663,6 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     var c = camTargets[name]();
     camera.position.set(c.pos[0], c.pos[1], c.pos[2]); controls.target.set(c.t[0], c.t[1], c.t[2]); controls.update();
   }
-
   function setMode(m) {
     mode = m;
     robot.visible = m === 'robot'; floor.visible = m === 'robot'; plateGroup.visible = m === 'plates';
@@ -577,8 +678,9 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     setCamera(camName);
   });
   $('walk').addEventListener('click', function () {
-    walking = !walking; this.textContent = walking ? 'Walking' : 'Standing'; this.classList.toggle('on', walking); this.setAttribute('aria-pressed', walking);
-    prevStanceX = null; if (!walking && legG.FL) applyPose(Gait.standPose(0));
+    walking = !walking; this.classList.toggle('on', walking); this.setAttribute('aria-pressed', walking);
+    this.textContent = walking ? (p.style === 'wheg' ? 'Driving' : 'Walking') : (p.style === 'wheg' ? 'Parked' : 'Standing');
+    prevStanceX = null; if (!walking && legG && d.legs && p.style !== 'wheg') applyPose(standPoseNow());
   });
   $('ghost').addEventListener('click', function () {
     ghostOn = !ghostOn; this.textContent = ghostOn ? 'Motors shown' : 'Motors hidden'; this.classList.toggle('on', ghostOn); this.setAttribute('aria-pressed', ghostOn);
@@ -590,17 +692,22 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     requestAnimationFrame(frame);
     if (!renderer || document.hidden) return;
     var dt = Math.min(0.05, (t - lastT) / 1000 || 0); lastT = t;
-    if (mode === 'robot' && walking && walker && legG.FL) {
-      var pose = walker.update(dt); applyPose(pose);
-      var sx = stanceX(pose);
-      if (sx !== null && prevStanceX !== null) { floorX += sx - prevStanceX; floor.position.x = ((floorX % 20) + 20) % 20; }
-      prevStanceX = sx;
+    if (mode === 'robot' && walking && walker && walker.style === p.style) {
+      if (p.style === 'wheg') {
+        var sp = walker.update(dt); applyWheels(walker.angle);
+        var v = sp.FL * walker.rpmFull / 60 * 2 * Math.PI * 0.8 * d.R * dt;          // mm the ground slides back
+        floorX -= v; floor.position.x = ((floorX % 20) + 20) % 20;
+      } else if (legG.FL) {
+        var pose = walker.update(dt); applyPose(pose);
+        var sx = stanceX(pose);
+        if (sx !== null && prevStanceX !== null) { floorX += sx - prevStanceX; floor.position.x = ((floorX % 20) + 20) % 20; }
+        prevStanceX = sx;
+      }
     }
     controls.update(); renderer.render(scene, camera);
   }
 
   // ------------------------------------------------------------------ refresh
-  var levelText = { ok: 'All good', warn: 'warning', bad: 'problem' };
   function renderChecks(ul, list) {
     ul.innerHTML = '';
     list.forEach(function (c) {
@@ -608,34 +715,30 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     });
   }
   function updateUI() {
+    Array.prototype.forEach.call(stylesEl.querySelectorAll('.stylecard'), function (b) { b.setAttribute('aria-checked', b.dataset.style === p.style ? 'true' : 'false'); });
     Object.keys(outputs).forEach(function (k) {
       var o = outputs[k], v = p[k], dec = o.step < 1 ? 1 : 0;
-      o.inp.value = v; o.out.textContent = v.toFixed(dec) + ' ' + o.unit;
+      o.inp.value = v; o.out.textContent = (v * o.mult).toFixed(dec) + (o.unit ? ' ' + o.unit : '');
     });
     Object.keys(fieldInputs).forEach(function (path) { var v = getPath(p, path); if (document.activeElement !== fieldInputs[path]) fieldInputs[path].value = v; });
     if (document.activeElement !== $('rname')) $('rname').value = p.name;
     $('batpreset').value = p.batteryPreset;
-    for (var i = 0; i < 4; i++) {
-      $('slotchip' + i).style.background = p.ams[i].hex; $('slotname' + i).textContent = 'Slot ' + (i + 1) + ': ' + p.ams[i].name;
-    }
-    Array.prototype.forEach.call(document.querySelectorAll('.sw'), function (b) {
-      b.setAttribute('aria-pressed', p.ams[+b.dataset.slot].hex === b.dataset.hex ? 'true' : 'false');
-    });
+    for (var i = 0; i < 4; i++) { $('slotchip' + i).style.background = p.ams[i].hex; $('slotname' + i).textContent = 'Slot ' + (i + 1) + ': ' + p.ams[i].name; }
+    Array.prototype.forEach.call(document.querySelectorAll('.sw'), function (b) { b.setAttribute('aria-pressed', p.ams[+b.dataset.slot].hex === b.dataset.hex ? 'true' : 'false'); });
     function opts(sel, withSame) {
       sel.innerHTML = '';
       if (withSame) sel.appendChild(el('option', { value: 0, text: 'Same as its leg' }));
       for (var j = 0; j < 4; j++) sel.appendChild(el('option', { value: j + 1, text: 'Slot ' + (j + 1) + ' – ' + p.ams[j].name }));
     }
-    ['body', 'trim', 'FL', 'FR', 'RL', 'RR'].forEach(function (k) { var s = $('as-' + k); opts(s, false); s.value = p.slots[k]; });
+    ['body', 'trim'].concat(M.STYLE_INFO[p.style].legs).forEach(function (k) { var s = $('as-' + k); opts(s, false); s.value = p.slots[k]; });
     var fs = $('as-feet'); opts(fs, true); fs.value = p.slots.feet || 0;
 
-    var st = $('status'), n = { warn: 0, bad: 0 };
+    var stt = $('status'), n = { warn: 0, bad: 0 };
     an.checks.forEach(function (c) { if (c.level !== 'ok') n[c.level]++; });
-    st.className = 'status ' + an.worst;
-    st.innerHTML = '';
-    st.appendChild(el('span', { class: 'dot ' + an.worst }));
-    st.appendChild(el('span', { text: an.worst === 'ok' ? 'All checks green' : an.worst === 'warn' ? n.warn + ' to look at' : n.bad + ' to fix' }));
-    TABS.forEach(function (t) {
+    stt.className = 'status ' + an.worst; stt.innerHTML = '';
+    stt.appendChild(el('span', { class: 'dot ' + an.worst }));
+    stt.appendChild(el('span', { text: an.worst === 'ok' ? 'All checks green' : an.worst === 'warn' ? n.warn + ' to look at' : n.bad + ' to fix' }));
+    tabList.forEach(function (t) {
       var lv = 'ok', list = an.checks.filter(function (c) { return t.checks.indexOf(c.id) >= 0; });
       list.forEach(function (c) { if (c.level === 'bad') lv = 'bad'; else if (c.level === 'warn' && lv !== 'bad') lv = 'warn'; });
       var dot = $('tabdot-' + t.id); dot.className = 'dot ' + lv; dot.hidden = lv === 'ok' || !t.checks.length;
@@ -649,7 +752,7 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     [[an.plates.length, 'print plates'], [an.grams.toFixed(0) + ' g', 'plastic'], ['~' + hours + ' h', 'print time (rough)'], [objs.length, 'pieces']].forEach(function (s) {
       fs.appendChild(el('div', { class: 'stat' }, [el('b', { text: String(s[0]) }), el('span', { text: s[1] })]));
     });
-    $('fwnums').textContent = 'GAIT_STRIDE_DEG = ' + p.stride + '\nGAIT_LIFT_DEG = ' + p.lift + '\nGAIT_PERIOD_S = ' + p.period + '\nGAIT_SWAY_DEG = ' + p.sway + '\nGAIT_SPLAY_DEG = ' + p.legSplay;
+    $('fwnums').textContent = X.settingsText(p).trim();
     var bad = an.worst === 'bad'; $('make').disabled = bad;
     $('makenote').textContent = bad ? 'Fix the red items first. They stop the robot from working.' : an.worst === 'warn' ? 'You can still print. Yellow items are worth a look first.' : 'The zip has one print file per plate, your settings, and a read-me.';
   }
@@ -677,37 +780,51 @@ pre.code { margin: 0; background: var(--surface2); border-radius: 12px; padding:
     }).catch(function (e) { if (!e || e.code !== 'declined') toast('Could not save the file. ' + ((e && e.message) || '')); });
   }
   function slug() { return (p.name || 'walker').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'walker'; }
-  $('make').addEventListener('click', function () {
-    var b = this; b.disabled = true; b.textContent = 'Making files...';
+  function makeFiles() {
+    var b = $('make'); b.disabled = true; b.textContent = 'Making files...';
     X.buildZip(JSZip, M, p, { settings: true }).then(function (bytes) { return saveFile(slug() + '-print-files.zip', bytes, 'application/zip'); })
       .catch(function (e) { toast('Something went wrong making the files: ' + e.message); })
       .then(function () { b.textContent = 'Make my print files'; b.disabled = an.worst === 'bad'; });
-  });
-  $('savejson').addEventListener('click', function () { saveFile(slug() + '-design.json', JSON.stringify({ app: 'Walker Designer', version: 1, params: p }, null, 1), 'application/json'); });
-  $('loadjson').addEventListener('change', function () {
-    var f = this.files && this.files[0]; if (!f) return; var r = new FileReader();
+  }
+  function loadFile() {
+    var f = this.files && this.files[0]; if (!f) return; var r = new FileReader(), inp = this;
     r.onload = function () {
-      try { var j = JSON.parse(r.result); adopt(j.params || j); changed(true); toast('Opened ' + (p.name || 'design')); } catch (e) { toast('That file is not a Walker design.'); }
+      try {
+        var j = JSON.parse(r.result), np = fromSaved(j.params || j);
+        designs[p.style] = p; p = np; designs[p.style] = p;
+        buildPanel(); buildPresets(); changed(true); toast('Opened ' + (p.name || 'design'));
+      } catch (e) { toast('That file is not a Walker design.'); }
     };
-    r.readAsText(f); this.value = '';
-  });
+    r.readAsText(f); inp.value = '';
+  }
   var resetArmed = false;
-  $('reset').addEventListener('click', function () {
-    if (!resetArmed) { resetArmed = true; this.textContent = 'Tap again to erase changes'; var b = this; setTimeout(function () { resetArmed = false; b.textContent = 'Start over'; }, 3500); return; }
-    resetArmed = false; this.textContent = 'Start over'; p = M.defaults(); changed(true);
-  });
+  function resetClick() {
+    var b = $('reset');
+    if (!resetArmed) { resetArmed = true; b.textContent = 'Tap again to erase changes'; setTimeout(function () { resetArmed = false; if ($('reset')) $('reset').textContent = 'Start over'; }, 3500); return; }
+    resetArmed = false; b.textContent = 'Start over'; var nm = p.name; p = M.styleDefaults(p.style); p.name = nm; changed(true);
+  }
 
   // ------------------------------------------------------------------ go
   var ok = initScene();
-  showTab('shape');
+  buildPanel(); buildPresets();
   rebuild();
   if (ok) { setMode('robot'); requestAnimationFrame(frame); }
   window.WDApp = {
     get p() { return p; }, get an() { return an; }, get d() { return d; }, set: function (k, v) { p[k] = v; rebuild(); },
+    setStyle: function (st) { switchStyle(st); rebuild(); },
     rebuild: rebuild, showTab: showTab, setMode: setMode, applyPose: applyPose,
     footWorld: function (leg) {
       robot.updateMatrixWorld(true);
       return kneeG[leg].localToWorld(new THREE.Vector3(d.Qu - d.a, d.vFc, d.footBot - d.Kw)).toArray();
+    },
+    setWheel: function (angles) { applyWheels(angles); },
+    wheelTips: function (leg) {
+      robot.updateMatrixWorld(true); var out = [];
+      for (var i = 0; i < d.n; i++) {
+        var a = i * d.pitch * DEG, v = new THREE.Vector3(d.padCenterR * Math.cos(a), d.padCenterR * Math.sin(a), d.hubY0 + d.padW / 2);
+        out.push(spinG[leg].localToWorld(v).toArray());
+      }
+      return out;
     }
   };
 })();

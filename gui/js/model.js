@@ -10,16 +10,19 @@
  * nothing here has been test-printed yet.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./geom.js'), require('./gait.js'));
-  else { root.WD = root.WD || {}; root.WD.model = factory(root.WD.geom, root.WD.gait); }
-})(typeof self !== 'undefined' ? self : this, function (G, Gait) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./geom.js'), require('./gait.js'), require('./wheg.js'));
+  else { root.WD = root.WD || {}; root.WD.model = factory(root.WD.geom, root.WD.gait, root.WD.wheg); }
+})(typeof self !== 'undefined' ? self : this, function (G, Gait, WhegMod) {
   'use strict';
   var DEG = Math.PI / 180;
   var LEGS = Gait.LEGS;
   var HIP_SIGN = { FL: 1, FR: -1, RL: 1, RR: -1 };          // body corner signs: x = sx*hx, y = sy*hy
-  var HIP_SY = { FL: 1, FR: -1, RL: 1, RR: -1 };
-  var HIP_SX = { FL: 1, FR: 1, RL: -1, RR: -1 };
-  var YAW_SIGN = { FL: -1, FR: 1, RL: -1, RR: 1 };         // + hip command = foot toward the FRONT
+  var HIP_SY = { FL: 1, FR: -1, RL: 1, RR: -1, ML: 1, MR: -1 };
+  var HIP_SX = { FL: 1, FR: 1, RL: -1, RR: -1, ML: 0, MR: 0 };     // hexapod middle legs sit at x = 0
+  var YAW_SIGN = { FL: -1, FR: 1, RL: -1, RR: 1, ML: -1, MR: 1 };  // + hip command = foot toward the FRONT
+  var STYLES = ['crab', 'hex', 'wheg'];
+  function legsOf(p) { return p.style === 'hex' ? Gait.HEX_LEGS : Gait.LEGS; }
+  var DENS = 6.8e-4;                      // g per mm3 of printed volume (PLA 1.24 g/cm3 with walls + ~25% infill)
 
   var BATTERY_PRESETS = {
     '4xAA': { label: '4 x AA holder (flat, with cover)', L: 62, W: 58, H: 17, mass: 135 },
@@ -32,31 +35,35 @@
     extraLength: [0, 40, 1], extraWidth: [0, 40, 1], cornerRadius: [2, 24, 1],
     coxaLen: [30, 60, 1], femurLen: [35, 95, 1], stanceAngle: [30, 75, 1], legWidth: [9, 16, 0.5],
     legThick: [2.6, 5, 0.2], legSplay: [30, 80, 1], footSize: [14, 32, 1], tipDrop: [8, 16, 1],
-    stride: [8, 30, 1], lift: [10, 35, 1], period: [0.8, 3, 0.1], sway: [0, 15, 1]
+    stride: [8, 30, 1], lift: [10, 35, 1], period: [0.8, 3, 0.1], sway: [0, 15, 1],
+    spokeLen: [30, 75, 1], spokeCount: [2, 6, 1], padSize: [8, 22, 1], padWidth: [5, 16, 1], maxThrottle: [0.2, 1, 0.05]
   };
 
   function defaults() {
     return {
-      version: 1, name: 'My Walker',
+      version: 2, name: 'My Walker', style: 'crab',
       extraLength: 0, extraWidth: 0, cornerRadius: 3, floorT: 3.5,
       coxaLen: 34, femurLen: 55, stanceAngle: 45, legWidth: 10, legThick: 3.2, legSplay: 50,
       footSize: 20, tipDrop: 8, footH: 9,
       stride: 20, lift: 25, period: 1.6, sway: 14,
       ams: [{ name: 'Sky blue', hex: '#3aa7ff' }, { name: 'Orange', hex: '#ff8a1f' },
             { name: 'Lime', hex: '#7ed321' }, { name: 'Pink', hex: '#ff5fa2' }],
-      slots: { body: 1, trim: 2, FL: 2, FR: 3, RL: 4, RR: 1, feet: 0 },   // feet 0 = same color as the leg
+      slots: { body: 1, trim: 2, FL: 2, FR: 3, RL: 4, RR: 1, ML: 3, MR: 2, feet: 0 },   // feet 0 = same color as the leg
       servo: { L: 22.8, W: 12.2, H: 22.5, tabSpan: 32.2, tabThick: 2.5, tabFromTop: 4.0, shaftOff: 5.9,
                holeSpan: 27.8, shaftH: 5.0, mass: 13.4, torque: 2.0, hornThick: 2.0, hornGap: 0.8,
                hornHoles: [5, 11], hub: 7.0, pilot: 1.6 },
       board: { L: 68, W: 46.5, H: 10.6, mass: 22 },
       microbit: { L: 52, W: 42, H: 4, mass: 8 },
       batteryPreset: '4xAA', battery: { L: 62, W: 58, H: 17, mass: 135 },
+      spokeLen: 48, spokeCount: 3, padSize: 12, padWidth: 8, maxThrottle: 0.4,
+      wheelServo: { torque: 1.3, mass: 10.6, rpm: 110 },
       clearance: 0.3, bed: 256
     };
   }
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function clampParams(p) {
+    if (STYLES.indexOf(p.style) < 0) p.style = 'crab';
     Object.keys(RANGES).forEach(function (k) {
       var r = RANGES[k]; if (typeof p[k] !== 'number' || isNaN(p[k])) p[k] = defaults()[k];
       p[k] = Math.min(r[1], Math.max(r[0], p[k]));
@@ -72,7 +79,7 @@
   };
 
   // ------------------------------------------------------------------ layout
-  function derive(p) {
+  function deriveLegged(p) {
     var s = p.servo, c = p.clearance, d = {};
     d.t = p.legThick;
     d.eL = p.board.L + 2 * c; d.eW = p.board.W + 2 * c;
@@ -88,14 +95,22 @@
     d.hy = d.halfLy - d.tabReach - 3;
     d.halfLx = d.hx + d.cutW / 2 + 4;
     d.bodyCy = d.hy - (s.L / 2 - s.shaftOff);                    // |y| of the hip servo body centre
+    d.legs = legsOf(p);
+    if (p.style === 'hex') {                                    // middle motors sit beside the bays, so the body is wider
+      d.bodyCy = d.innerW / 2 + 2 + d.cutL / 2 + p.extraWidth / 2;
+      d.hy = d.bodyCy + (s.L / 2 - s.shaftOff);
+      d.halfLy = d.hy + d.tabReach + 3;
+    }
+    d.win = {};
+    d.legs.forEach(function (l) { d.win[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.bodyCy]; });
     // roundest corner (up to the requested one) that still keeps every motor tab 2 mm inside the edge
     var req = Math.min(p.cornerRadius, d.halfLx - 1, d.halfLy - 1), r = req;
     function tabsInside(rad) {
       var o = G.rrect(0, 0, 2 * d.halfLx, 2 * d.halfLy, rad, 8), ok = true;
-      [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
-        var pt = [d.hx + a * (d.cutW / 2 + 1.5), d.bodyCy + b * (s.tabSpan / 2 + 0.5)];
+      d.legs.forEach(function (l) { [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
+        var pt = [d.win[l][0] + a * (d.cutW / 2 + 1.5), d.win[l][1] + b * (s.tabSpan / 2 + 0.5)];
         if (!G.pointInPoly(pt, o) || G.distToPolyEdge(pt, o) < 2.0) ok = false;
-      }); });
+      }); }); });
       return ok;
     }
     while (r > 0.5 && !tabsInside(r)) r -= 0.5;
@@ -130,18 +145,20 @@
     d.hip = {}; d.heading = {};
     var sp = p.legSplay;
     d.heading.FL = sp; d.heading.FR = -sp; d.heading.RL = 180 - sp; d.heading.RR = -(180 - sp);
-    LEGS.forEach(function (l) { d.hip[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.hy]; });
+    d.heading.ML = 90; d.heading.MR = -90;
+    d.legs.forEach(function (l) { d.hip[l] = [HIP_SX[l] * d.hx, HIP_SY[l] * d.hy]; });
     return d;
   }
 
   // ------------------------------------------------------------------ parts (shells)
   function buildBody(p, d) {
-    var s = p.servo, holes = [], sx, sy, k;
+    var s = p.servo, holes = [], k;
     holes.push(G.rrect(0, d.yE, d.eL - 14, d.eW - 14, 3, 4));                       // window under the board
-    for (sx = -1; sx <= 1; sx += 2) for (sy = -1; sy <= 1; sy += 2) {
-      holes.push(G.rect(sx * d.hx, sy * d.bodyCy, d.cutW, d.cutL));
-      for (k = -1; k <= 1; k += 2) holes.push(G.circle(sx * d.hx, sy * d.bodyCy + k * s.holeSpan / 2, s.pilot / 2, 14));
-    }
+    d.legs.forEach(function (l) {
+      var w = d.win[l];
+      holes.push(G.rect(w[0], w[1], d.cutW, d.cutL));
+      for (k = -1; k <= 1; k += 2) holes.push(G.circle(w[0], w[1] + k * s.holeSpan / 2, s.pilot / 2, 14));
+    });
     return G.extrude(d.outline, holes, 0, d.floorT);
   }
 
@@ -189,7 +206,7 @@
   }
 
   function buildFoot(p, d) {
-    var r = p.footSize / 2;
+    var r = Math.max(p.footSize, d.minFoot) / 2;       // too-small feet are flagged red by the check; keep the preview valid
     var base = G.extrude(G.circle(0, 0, r, 48), [], 0, d.footBase);
     var top = G.extrude(G.circle(0, 0, r, 48), [G.rect(0, 0, d.pocketU, d.pocketV)], d.footBase - 0.2, p.footH);
     return [base, top];
@@ -203,7 +220,7 @@
     foot: G.I3
   };
 
-  function buildParts(p, d) {
+  function buildPartsLegged(p, d) {
     return {
       body: [{ name: 'plate', slotKey: 'body', shells: [buildBody(p, d)] },
              { name: 'trim', slotKey: 'trim', shells: buildTrim(p, d) }],
@@ -214,8 +231,8 @@
   }
 
   // The list of things to print: one Body + (coxa, femur, foot) per leg, each in print orientation, min corner at 0.
-  function printObjects(p, d, parts) {
-    parts = parts || buildParts(p, d);
+  function printObjectsLegged(p, d, parts) {
+    parts = parts || buildPartsLegged(p, d);
     var out = [];
     function make(kind, name, leg) {
       var rot = PRINT_ROT[kind], list = parts[kind].map(function (pt) {
@@ -231,23 +248,23 @@
                  size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], volume: vol });
     }
     make('body', 'Body');
-    LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       make('coxa', 'Upper leg ' + l, l); make('femur', 'Lower leg ' + l, l); make('foot', 'Foot ' + l, l);
     });
     return out;
   }
 
   // ------------------------------------------------------------------ hardware ghosts (preview only)
-  function hardware(p, d) {
-    var s = p.servo, fz = d.floorT, body = [], leg = [], knee = [], sx, sy;
+  function hardwareLegged(p, d) {
+    var s = p.servo, fz = d.floorT, body = [], leg = [], knee = [];
     body.push({ name: 'board', color: '#1f8a4c', size: [p.board.L, p.board.W, p.board.H], center: [0, d.yE, fz + p.board.H / 2] });
     body.push({ name: 'microbit', color: '#222a33', size: [p.microbit.L, p.microbit.W, p.microbit.H],
                 center: [0, d.yE, fz + p.board.H + p.microbit.H / 2] });
     body.push({ name: 'battery', color: '#6b7280', size: [p.battery.L, p.battery.W, p.battery.H], center: [0, d.yB, fz + p.battery.H / 2] });
-    for (sx = -1; sx <= 1; sx += 2) for (sy = -1; sy <= 1; sy += 2) {
-      body.push({ name: 'hipservo', color: '#2b6cb0', size: [s.W, s.L, s.H], center: [sx * d.hx, sy * d.bodyCy, d.hipFace + s.H / 2] });
-      body.push({ name: 'hiptab', color: '#2b6cb0', size: [s.W, s.tabSpan, s.tabThick], center: [sx * d.hx, sy * d.bodyCy, fz + s.tabThick / 2] });
-    }
+    d.legs.forEach(function (l) {
+      body.push({ name: 'hipservo', color: '#2b6cb0', size: [s.W, s.L, s.H], center: [d.win[l][0], d.win[l][1], d.hipFace + s.H / 2] });
+      body.push({ name: 'hiptab', color: '#2b6cb0', size: [s.W, s.tabSpan, s.tabThick], center: [d.win[l][0], d.win[l][1], fz + s.tabThick / 2] });
+    });
     leg.push({ name: 'hiphorn', color: '#e5e7eb', size: [19, 5.5, s.hornThick], center: [5.5, 0, (d.hornTop + d.hornBot) / 2] });
     leg.push({ name: 'kneeservo', color: '#2b6cb0', size: [s.L, s.H, s.W], center: [d.uc, d.vp0 + s.tabFromTop - s.H / 2, d.Kw] });
     leg.push({ name: 'kneetab', color: '#2b6cb0', size: [s.tabSpan, s.tabThick, s.W], center: [d.uc, d.vp0 - s.tabThick / 2, d.Kw] });
@@ -266,26 +283,25 @@
     return [h[0] + u * Math.cos(yaw) - v * Math.sin(yaw), h[1] + u * Math.sin(yaw) + v * Math.cos(yaw), w];
   }
 
-  var DENS = 6.8e-4;                      // g per mm3 of printed volume (PLA 1.24 g/cm3 with walls + ~25% infill)
   function masses(p, d, objs) {
     var m = { body: 0, coxa: 0, femur: 0, foot: 0 };
     objs.forEach(function (o) { m[o.kind] += o.volume * DENS; });
     // per-leg average
-    var legMass = { fixed: (m.coxa / 4) + p.servo.mass, swing: (m.femur / 4) + (m.foot / 4) + 2 };
+    var nl = d.legs.length, legMass = { fixed: (m.coxa / nl) + p.servo.mass, swing: (m.femur / nl) + (m.foot / nl) + 2 };
     var bodyParts = [
       [m.body, 0, 0, d.floorT / 2], [p.board.mass, 0, d.yE, d.floorT + 5], [p.microbit.mass, 0, d.yE, d.floorT + p.board.H + 2],
       [p.battery.mass, 0, d.yB, d.floorT + p.battery.H / 2]
     ];
-    LEGS.forEach(function (l) { bodyParts.push([p.servo.mass, d.hip[l][0], HIP_SY[l] * d.bodyCy, d.floorT + 8]); });
+    d.legs.forEach(function (l) { bodyParts.push([p.servo.mass, d.win[l][0], d.win[l][1], d.floorT + 8]); });
     var bm = 0, bx = 0, by = 0, bz = 0;
     bodyParts.forEach(function (b) { bm += b[0]; bx += b[0] * b[1]; by += b[0] * b[2]; bz += b[0] * b[3]; });
     return { printed: m, leg: legMass, bodyMass: bm, bodyCom: [bx / bm, by / bm, bz / bm],
-             total: bm + 4 * (legMass.fixed + legMass.swing) };
+             total: bm + nl * (legMass.fixed + legMass.swing) };
   }
 
   function comAt(p, d, mass, pose) {
     var M = mass.bodyMass, x = mass.bodyCom[0] * M, y = mass.bodyCom[1] * M, z = mass.bodyCom[2] * M;
-    LEGS.forEach(function (l) {
+    d.legs.forEach(function (l) {
       var hip = pose[l + '_hip'], lift = pose[l + '_knee'];
       var f = legFK(p, d, l, hip, 0, [d.uc, d.vp0 - 6, d.Kw]);                 // coxa + knee servo
       x += mass.leg.fixed * f[0]; y += mass.leg.fixed * f[1]; z += mass.leg.fixed * f[2]; M += mass.leg.fixed;
@@ -315,7 +331,8 @@
   }
 
   function walkCycle(p, steps) {
-    var W = new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay); W.command(1, 0);
+    var W = p.style === 'hex' ? new Gait.HexWalker(p.stride, p.lift, p.period, 2.0) : new Gait.Walker(p.stride, p.lift, p.period, 2.0, p.sway, p.legSplay);
+    W.command(1, 0);
     W.scale = { L: 1, R: 1 }; W.liftScale = 1; var out = [];
     for (var k = 0; k < steps; k++) { W.cycle = k / steps; out.push(W.pose()); }
     return out;
@@ -323,17 +340,17 @@
 
   function stability(p, d, mass) {
     var worst = Infinity, worstK = 0, minGap = Infinity, steps = 48, poses = walkCycle(p, steps);
-    var neutral = Gait.standPose(0), k;
+    var neutral = p.style === 'hex' ? Gait.hexStandPose(0) : Gait.standPose(0), k, nLegs = d.legs.length;
     poses.concat([neutral]).forEach(function (pose, idx) {
       var feet = [], stance = [];
-      LEGS.forEach(function (l) {
+      d.legs.forEach(function (l) {
         var f = legFK(p, d, l, pose[l + '_hip'], pose[l + '_knee']); feet.push(f);
         if (pose[l + '_knee'] <= 1.0) stance.push([f[0], f[1]]);
       });
       var com = comAt(p, d, mass, pose), margin = -60;
       if (stance.length >= 3) margin = insideMargin(hull(stance), com);
       if (margin < worst) { worst = margin; worstK = idx; }
-      for (var i = 0; i < 4; i++) for (var j = i + 1; j < 4; j++) {          // clearance between feet (centre distance)
+      for (var i = 0; i < nLegs; i++) for (var j = i + 1; j < nLegs; j++) {          // clearance between feet (centre distance)
         var gap = Math.hypot(feet[i][0] - feet[j][0], feet[i][1] - feet[j][1]) - p.footSize;
         if (gap < minGap) minGap = gap;
       }
@@ -344,17 +361,16 @@
   // ------------------------------------------------------------------ checks (kid-readable)
   function mk(id, level, title, detail) { return { id: id, level: level, title: title, detail: detail }; }
 
-  function analyze(p, objs) {
-    var d = derive(p), checks = [];
-    objs = objs || printObjects(p, d);
+  function analyzeLegged(p, objs) {
+    var d = deriveLegged(p), checks = [];
+    objs = objs || printObjectsLegged(p, d);
     var mass = masses(p, d, objs), st = stability(p, d, mass), s = p.servo;
 
     // hip windows inside the body outline (the corner radius was already limited in derive())
     var worstEdge = Infinity;
-    LEGS.forEach(function (l) {
-      var sx = HIP_SX[l], sy = HIP_SY[l];
+    d.legs.forEach(function (l) {
       [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
-        var pt = [sx * d.hx + a * (d.cutW / 2 + 1.5), sy * (d.bodyCy + b * (s.tabSpan / 2 + 0.5))];
+        var pt = [d.win[l][0] + a * (d.cutW / 2 + 1.5), d.win[l][1] + b * (s.tabSpan / 2 + 0.5)];
         var inside = G.pointInPoly(pt, d.outline);
         worstEdge = Math.min(worstEdge, inside ? G.distToPolyEdge(pt, d.outline) : -G.distToPolyEdge(pt, d.outline));
       }); });
@@ -368,11 +384,12 @@
       : mk('floor', 'bad', 'Body plate too thick', 'Plate must be thinner than ' + (s.tabFromTop - 0.3).toFixed(1) + ' mm so the motor can poke through.'));
 
     var mg = st.margin;
-    checks.push(mg >= 12 ? mk('stable', 'ok', 'Steady walker', 'Safe even when one leg is lifted (' + mg.toFixed(0) + ' mm to spare).')
-      : mg >= 3 ? mk('stable', 'warn', 'A bit wobbly', 'Only ' + mg.toFixed(0) + ' mm to spare when a leg lifts. Try longer sideways legs or a smaller lift.')
-      : mk('stable', 'bad', 'Might tip over', 'The robot\'s weight falls outside its feet when a leg lifts. Spread the legs out or lower the lift.'));
+    var lifting = p.style === 'hex' ? 'three legs lift' : 'a leg lifts';
+    checks.push(mg >= 12 ? mk('stable', 'ok', 'Steady walker', 'Safe even when ' + lifting + ' (' + mg.toFixed(0) + ' mm to spare).')
+      : mg >= 3 ? mk('stable', 'warn', 'A bit wobbly', 'Only ' + mg.toFixed(0) + ' mm to spare when ' + lifting + '. Try longer sideways legs or a smaller lift.')
+      : mk('stable', 'bad', 'Might tip over', 'The robot\'s weight falls outside its feet when ' + lifting + '. Spread the legs out or lower the lift.'));
 
-    var hipMax = p.stride + p.sway;
+    var hipMax = p.stride + (p.style === 'hex' ? 0 : p.sway);
     checks.push(hipMax <= 40 ? mk('hiprange', 'ok', 'Hips swing a safe amount', 'Biggest hip swing ' + hipMax.toFixed(0) + '° (limit 45°).')
       : mk('hiprange', hipMax <= 45 ? 'warn' : 'bad', 'Hips swing a lot', 'Stride + weight shift = ' + hipMax.toFixed(0) + '°. Keep it under 45° or the motors hit their stops.'));
 
@@ -430,8 +447,47 @@
     return plates;
   }
 
+  // ------------------------------------------------------------------ style dispatch (crab | hex | wheg)
+  function slotFor(p, key, leg) {
+    return key === 'body' ? p.slots.body : key === 'trim' ? p.slots.trim : key === 'leg' ? p.slots[leg] : (p.slots.feet || p.slots[leg]);
+  }
+  var Wheg = WhegMod.make({ mk: mk, packPlates: packPlates, buildTrim: buildTrim, slotFor: slotFor, DENS: DENS });
+  function isWheg(p) { return p.style === 'wheg'; }
+  function derive(p) { return isWheg(p) ? Wheg.derive(p) : deriveLegged(p); }
+  function buildParts(p, d) { return isWheg(p) ? Wheg.buildParts(p, d) : buildPartsLegged(p, d); }
+  function printObjects(p, d, parts) { return isWheg(p) ? Wheg.printObjects(p, d, parts) : printObjectsLegged(p, d, parts); }
+  function hardware(p, d) { return isWheg(p) ? Wheg.hardware(p, d) : hardwareLegged(p, d); }
+  function analyze(p, objs) { return isWheg(p) ? Wheg.analyze(p, objs) : analyzeLegged(p, objs); }
+
+  var STYLE_INFO = {
+    crab: { name: 'Crab walker', blurb: '4 legs, 8 motors. Creeps along one leg at a time and leans over the other three.', legs: Gait.LEGS, motors: 8 },
+    hex: { name: 'Hexapod', blurb: '6 legs, 12 motors. Three legs walk while three stand, so it is very steady.', legs: Gait.HEX_LEGS, motors: 12 },
+    wheg: { name: 'Windmill rover', blurb: '4 spinning spoked legs, 4 spin motors. Rolls fast and climbs over rough ground.', legs: Gait.LEGS, motors: 4 }
+  };
+  var STYLE_PRESETS = {
+    crab: PRESETS,
+    hex: {
+      'Starter hexapod': {},
+      'Tall hexapod': { coxaLen: 38, femurLen: 75, stanceAngle: 60, footSize: 22, legWidth: 12, legThick: 3.8 },
+      'Tiny hexapod': { coxaLen: 30, femurLen: 40, stanceAngle: 40, legSplay: 60, footSize: 18, stride: 16 }
+    },
+    wheg: {
+      'Starter rover': {},
+      'Rock crawler': { spokeLen: 58, spokeCount: 3, padSize: 14, padWidth: 10, extraLength: 16, extraWidth: 6, maxThrottle: 0.3, legWidth: 10 },
+      'Speedster': { spokeLen: 40, spokeCount: 4, padSize: 12, padWidth: 8, maxThrottle: 0.6 },
+      'Windmill': { spokeLen: 50, spokeCount: 4, padSize: 12, padWidth: 8, maxThrottle: 0.35 }
+    }
+  };
+  function styleDefaults(style) {
+    var p = defaults(); p.style = style;
+    if (style === 'hex') p.femurLen = 45;                      // 12 motors and a heavier body: shorter lower legs keep the knees comfortable
+    if (style === 'wheg') { p.batteryPreset = '4xAAA'; p.battery = { L: BATTERY_PRESETS['4xAAA'].L, W: BATTERY_PRESETS['4xAAA'].W, H: BATTERY_PRESETS['4xAAA'].H, mass: BATTERY_PRESETS['4xAAA'].mass }; }
+    return p;
+  }
+
   return {
-    LEGS: LEGS, HIP_SX: HIP_SX, HIP_SY: HIP_SY, YAW_SIGN: YAW_SIGN, RANGES: RANGES, PRESETS: PRESETS,
+    LEGS: LEGS, HIP_SX: HIP_SX, HIP_SY: HIP_SY, YAW_SIGN: YAW_SIGN, RANGES: RANGES, PRESETS: PRESETS, STYLES: STYLES, STYLE_INFO: STYLE_INFO,
+    STYLE_PRESETS: STYLE_PRESETS, styleDefaults: styleDefaults, legsOf: legsOf,
     BATTERY_PRESETS: BATTERY_PRESETS, PRINT_ROT: PRINT_ROT, DENS: DENS,
     defaults: defaults, clone: clone, clampParams: clampParams, derive: derive,
     buildParts: buildParts, printObjects: printObjects, hardware: hardware, femurOutline: femurOutline,
