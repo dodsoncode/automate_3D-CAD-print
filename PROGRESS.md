@@ -139,3 +139,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests: `makecode-kid/tests` now 13 pass (6 new): TS hexapod gait and wheg drive equal the Python versions to 1e-9 (angles with wrap), wheg pulse equals `wheg_pulse_us`, hexapod stand drives 12 channels, crab still 8, rover stand = stop pulse on channels 0-3 and the trim shifts it.
 - Verification: script-checked only. NOT loaded into the MakeCode editor (block text such as the new enum labels is unverified) and not run on hardware.
 - NEXT: S6 docs and PR.
+
+### 2026-10-21 - Styles S6: docs, hermetic tests, PR
+- DONE: `design/README.md` and `PLAN.md` point to `design/styles.md`. `gui/tests/test_model.py` no longer needs `three` installed (uses the vendored copy), so the whole suite runs from a clean checkout.
+- Final run: firmware 39, gait parity + model + browser 25, MakeCode 13 - all pass (firmware 39 + 38 others).
+- Verification overall: script-checked and desktop-browser-tested only. NOT done: open any style's 3MF in Bambu Studio (T1.1), print and fit-test a wheg or hex leg, run on real servos/micro:bit, MakeCode editor import, tablet check.
+- Open for Jacob: TS6 (buy 4 FS90R, 4 more MG90S for the hexapod; trim each FS90R stop; print one windmill leg) plus the older TK6-TK9 and T1.1. PR #5 (log of PR #4) is still unmerged.
+- NEXT: Jacob reviews the styles PR.

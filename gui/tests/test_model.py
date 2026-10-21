@@ -4,17 +4,25 @@ import json
 import os
 import subprocess
 
+import tempfile
+
 HERE = os.path.dirname(os.path.abspath(__file__))
+# geom.js does require('three') under Node: point it at the vendored copy so no npm install is needed
+_SHIM = tempfile.mkdtemp()
+os.makedirs(os.path.join(_SHIM, "three"))
+with open(os.path.join(_SHIM, "three", "index.js"), "w") as _f:
+    _f.write("module.exports = require(%r);" % os.path.join(HERE, "..", "vendor", "three.min.js"))
+ENV = dict(os.environ, NODE_PATH=_SHIM + os.pathsep + os.environ.get("NODE_PATH", ""))
 
 
 def node(js):
-    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, cwd=HERE)
+    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, cwd=HERE, env=ENV)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
 
 def test_fuzz_all_styles_closed_and_defaults_green():
-    r = subprocess.run(["node", os.path.join(HERE, "fuzz_model.js"), "80"], capture_output=True, text=True)
+    r = subprocess.run(["node", os.path.join(HERE, "fuzz_model.js"), "80"], capture_output=True, text=True, env=ENV)
     assert r.returncode == 0, r.stderr
     rep = json.loads(r.stdout)
     assert rep["failures"] == [], rep["failures"][:3]
