@@ -50,9 +50,9 @@ def run(w, seconds, dt=0.02):
 # ---------------- gait ----------------
 def test_profile_endpoints():
     assert leg_profile(0.0)[0] == pytest.approx(-1.0)
-    assert leg_profile(0.25)[0] == pytest.approx(1.0)       # swing ends at front
+    assert leg_profile(gait.SWING_FRAC)[0] == pytest.approx(1.0)       # swing ends at front
     assert leg_profile(0.9999)[0] == pytest.approx(-1.0, abs=1e-3)
-    assert leg_profile(0.125)[1] == pytest.approx(1.0)      # max lift mid-swing
+    assert leg_profile(gait.SWING_FRAC / 2)[1] == pytest.approx(1.0)      # max lift mid-swing
     assert leg_profile(0.5)[1] == 0.0
 
 
@@ -69,7 +69,7 @@ def test_at_most_one_leg_in_swing_at_any_time():
     for i in range(1000):
         t = i / 1000
         swinging = [l for l in LEGS if leg_phase(t, l) < gait.SWING_FRAC]
-        assert len(swinging) == 1
+        assert len(swinging) <= 1          # never two feet in the air; brief moments with all four down
 
 
 def test_swing_order_and_even_spacing():
@@ -267,3 +267,27 @@ def test_battery_divider_range():
     full = 8.4 / config.BATT_DIVIDER
     cutoff = config.BATT_CUTOFF_V / config.BATT_DIVIDER
     assert 0 < cutoff < full < 3.1             # inside ESP32 ADC range at 11 dB
+
+
+# ---------------- weight shift (sway) ----------------
+def test_sway_zero_is_identical_to_plain_gait():
+    a, b = Walker(), Walker(sway_deg=0.0)
+    for w in (a, b):
+        w.command(1, 0)
+    for pa, pb in zip(run(a, 4.0), run(b, 4.0)):
+        assert pa == pb
+
+
+def test_sway_only_moves_hips_and_stays_within_limit():
+    plain, swayed = Walker(), Walker(sway_deg=9.0)
+    for w in (plain, swayed):
+        w.command(1, 0)
+    pp, ps = run(plain, 6.0), run(swayed, 6.0)
+    assert any(abs(a["FL_hip"] - b["FL_hip"]) > 1.0 for a, b in zip(pp, ps))
+    assert all(a[l + "_knee"] == b[l + "_knee"] for a, b in zip(pp, ps) for l in LEGS)
+    assert max(abs(p[l + "_hip"]) for p in ps for l in LEGS) <= config.LIMITS["hip"][1]
+
+
+def test_sway_is_off_when_standing():
+    w = Walker(sway_deg=9.0)
+    assert all(abs(v) < 1e-9 for v in w.update(0.02).values())

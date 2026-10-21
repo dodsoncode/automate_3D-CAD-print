@@ -15,6 +15,8 @@ PWM board. Control is over Wi-Fi from a phone browser, or over USB serial.
 | Control | Phone browser over Wi-Fi (robot is its own access point), or USB REPL |
 | Parts cost | ~$40-60 (see [components.md](components.md)) |
 
+**Building this with a child?** See [kid-edition.md](kid-edition.md) for the micro:bit / AA-battery / no-soldering version.
+
 Simpler alternative: a 2-servo "shuffle" walker (one servo tilts the body side to side,
 one swings the legs). It's cheaper and easier to build but walks crudely. The firmware's
 layered design ports to it by changing `config.py` and `gait.py`.

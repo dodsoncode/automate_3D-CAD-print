@@ -1,0 +1,18 @@
+{
+    "name": "walker",
+    "version": "0.1.0",
+    "description": "Blocks for a 4-legged, 8-servo walking robot on a micro:bit with a PCA9685 servo board (Kitronik Compact 16 Servo Driver)",
+    "dependencies": {
+        "core": "*"
+    },
+    "files": [
+        "README.md",
+        "gait.ts",
+        "walker.ts"
+    ],
+    "testFiles": [],
+    "public": false,
+    "targetVersions": {
+        "target": "7.0.0"
+    }
+}

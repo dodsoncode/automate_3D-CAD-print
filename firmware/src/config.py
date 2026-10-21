@@ -52,6 +52,8 @@ LIMITS = {"hip": (-45.0, 45.0), "knee": (-30.0, 60.0)}
 GAIT_STRIDE_DEG = 20.0   # hip sweep amplitude (+-)
 GAIT_LIFT_DEG = 25.0     # knee lift during swing
 GAIT_PERIOD_S = 1.6      # one full 4-leg cycle
+GAIT_SWAY_DEG = 14.0     # weight shift: stance hips nudge so the body leans over the 3 standing feet
+GAIT_SPLAY_DEG = 50.0    # leg heading from the body axis; must match the printed design (legSplay)
 LOOP_HZ = 50
 
 # ---- Battery (2S LiPo through 100k/47k divider on GPIO34) ----

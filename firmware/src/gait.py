@@ -15,12 +15,53 @@ import math
 LEGS = ("FL", "FR", "RL", "RR")
 SIDE = {"FL": "L", "RL": "L", "FR": "R", "RR": "R"}
 SWING_SLOT = {"RR": 0, "FR": 1, "RL": 2, "FL": 3}
-SWING_FRAC = 0.25
+SWING_FRAC = 0.20          # a leg is in the air for 20% of the cycle; all 4 are down for the other 5%
+SLOT_SPACING = 0.25        # legs start their swings a quarter cycle apart
+
+# Weight shift ("sway"). A 4-legged walker with symmetric feet cannot stand on 3 legs unless its weight moves over
+# them, so while leg k swings the other legs nudge their hips and the body slides away from the lifted corner.
+# Same maths as gui/js/gait.js (gui/tests/test_gait_parity.py checks they agree).
+CORNER = {"FL": (1, 1), "FR": (1, -1), "RL": (-1, 1), "RR": (-1, -1)}   # x forward, y left
+YAW_SIGN = {"FL": -1, "FR": 1, "RL": -1, "RR": 1}                        # hip + = foot toward the front
+SWAY_RAMP_IN = 0.08       # weight starts moving this much of a cycle BEFORE a leg lifts
+SWAY_RAMP_OUT = 0.05      # ...and eases back this much after it lands
+_SQRT_HALF = math.sqrt(0.5)
+
+
+def _heading(leg, splay_deg):
+    return {"FL": splay_deg, "FR": -splay_deg, "RL": 180 - splay_deg, "RR": -(180 - splay_deg)}[leg]
+
+
+def foot_tangent(leg, splay_deg):
+    """Direction the foot moves in the body plane for a + hip command."""
+    h = math.radians(_heading(leg, splay_deg))
+    return (-YAW_SIGN[leg] * math.sin(h), YAW_SIGN[leg] * math.cos(h))
+
+
+def sway_envelope(phase):
+    if phase < SWING_FRAC:
+        return 1.0
+    if phase < SWING_FRAC + SWAY_RAMP_OUT:
+        return 0.5 * (1 + math.cos(math.pi * (phase - SWING_FRAC) / SWAY_RAMP_OUT))
+    if phase > 1.0 - SWAY_RAMP_IN:
+        return 0.5 * (1 - math.cos(math.pi * (phase - (1.0 - SWAY_RAMP_IN)) / SWAY_RAMP_IN))
+    return 0.0
+
+
+def sway_offset(leg, cycle_t, sway_deg, splay_deg):
+    total = 0.0
+    tg = foot_tangent(leg, splay_deg)
+    for k in LEGS:
+        if k == leg:
+            continue
+        dot = (tg[0] * CORNER[k][0] + tg[1] * CORNER[k][1]) * _SQRT_HALF
+        total += sway_deg * dot * sway_envelope(leg_phase(cycle_t, k))
+    return total
 
 
 def leg_phase(cycle_t, leg):
     """Phase of one leg in [0, 1) given the body cycle phase."""
-    return (cycle_t - SWING_SLOT[leg] * SWING_FRAC) % 1.0
+    return (cycle_t - SWING_SLOT[leg] * SLOT_SPACING) % 1.0
 
 
 def leg_profile(phase):
@@ -43,11 +84,13 @@ def _approach(cur, target, step):
 
 
 class Walker:
-    def __init__(self, stride_deg=20.0, lift_deg=25.0, period_s=1.6, ramp_per_s=2.0):
+    def __init__(self, stride_deg=20.0, lift_deg=25.0, period_s=1.6, ramp_per_s=2.0, sway_deg=0.0, splay_deg=50.0):
         self.stride = stride_deg
         self.lift = lift_deg
         self.period = period_s
         self.ramp = ramp_per_s       # how fast sweep scale changes (1/s)
+        self.sway = sway_deg         # weight-shift amplitude (deg of hip)
+        self.splay = splay_deg       # leg heading from the body axis (deg), matches the design
         self.cycle = 0.0
         self.target = {"L": 0.0, "R": 0.0}
         self.scale = {"L": 0.0, "R": 0.0}
@@ -83,6 +126,8 @@ class Walker:
         for leg in LEGS:
             hip_f, lift_f = leg_profile(leg_phase(self.cycle, leg))
             out[leg + "_hip"] = self.stride * self.scale[SIDE[leg]] * hip_f
+            if self.sway:
+                out[leg + "_hip"] += self.lift_scale * sway_offset(leg, self.cycle, self.sway, self.splay)
             out[leg + "_knee"] = self.lift * self.lift_scale * lift_f
         return out
 
