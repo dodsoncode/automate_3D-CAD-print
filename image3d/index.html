@@ -364,6 +364,25 @@
       .then(function () { if (timer) clearTimeout(timer); });
   }
 
+  // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor
+  var generating = false;
+  function setGenerating(on, text) { generating = on; $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
+  $('btn-generate').addEventListener('click', function () {
+    if (generating) return;
+    var file = $('gen-photo').files && $('gen-photo').files[0];
+    if (!file) { msg('Choose a photo first.', true); return; }
+    var fd = new FormData(); fd.append('image', file, file.name || 'photo.jpg');
+    setGenerating(true, 'Generating... this can take a minute or two');
+    msg('');
+    fetch('api/generate', { method: 'POST', headers: { 'X-Passcode': $('gen-pass').value }, body: fd })
+      .then(function (r) {
+        if (r.ok) return r.arrayBuffer().then(function (buf) { setGenerating(false); openBytes('generated.glb', new Uint8Array(buf)); });
+        return r.json().then(function (j) { return j && j.detail; }, function () { return null; })
+          .then(function (d) { throw new Error(typeof d === 'string' && d ? d : 'Server error ' + r.status); });
+      })
+      .catch(function (e) { setGenerating(false); msg(String(e && e.message || e) === 'Failed to fetch' ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e), true); });
+  });
+
   initView();
   refresh();
   App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };

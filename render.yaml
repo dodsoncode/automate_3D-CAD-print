@@ -1,0 +1,19 @@
+# Render Blueprint for the Image3D service (see image3d/DEPLOY.md)
+services:
+  - type: web
+    name: image3d
+    runtime: python
+    plan: free
+    rootDir: image3d
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: HF_TOKEN
+        sync: false
+      - key: IMAGE3D_PASSCODE
+        sync: false
+      - key: HF_SPACE
+        value: tencent/Hunyuan3D-2.1
+      - key: HF_API_NAME
+        value: ""

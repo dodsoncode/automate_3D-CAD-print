@@ -239,3 +239,78 @@ def test_view_stays_in_viewport_when_tools_scroll(page):
     page.locator("#btn-export").scroll_into_view_if_needed()
     box = page.evaluate("(()=>{const r=document.querySelector('#view canvas').getBoundingClientRect();return [r.top,r.bottom,innerHeight];})()")
     assert box[0] >= 0 and box[1] <= box[2] and box[1] - box[0] > 100
+
+
+# ---------- server mode (uvicorn + FAKE generator; no Hugging Face involved) ----------
+LAUNCH = """
+import sys, time, uvicorn
+sys.path.insert(0, %r)
+import server
+glb = open(%r, 'rb').read()
+def fake(image, name):
+    time.sleep(1.0)
+    return glb
+server.GENERATOR = fake
+uvicorn.run(server.app, host='127.0.0.1', port=int(sys.argv[1]), log_level='warning')
+""" % (I3D, os.path.join(SAMPLES, "two_cubes.glb"))
+
+
+@pytest.fixture(scope="module")
+def live_server():
+    pytest.importorskip("fastapi")
+    import socket
+    import time
+    import urllib.request
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    env = dict(os.environ, IMAGE3D_PASSCODE="sesame", HF_TOKEN="hf_fake")
+    proc = subprocess.Popen([sys.executable, "-c", LAUNCH, str(port)], env=env)
+    url = "http://127.0.0.1:%d/" % port
+    try:
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(url + "api/health", timeout=1).read()
+                break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("uvicorn did not start")
+        yield url
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
+def test_generate_in_server_mode(browser, live_server):
+    pg = new_page(browser, live_server)
+    assert pg.evaluate("I3DApp.serverMode") is True
+    assert pg.locator("#gen-panel").is_visible()
+    pg.set_input_files("#gen-photo", {"name": "photo.png", "mimeType": "image/png", "buffer": b"\x89PNG\r\n\x1a\n" + b"\0" * 32})
+    # wrong passcode: the server's detail shows in #msg and the button is usable again
+    pg.fill("#gen-pass", "nope")
+    pg.locator("#btn-generate").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('wrong passcode')")
+    assert pg.locator("#btn-generate").is_enabled()
+    assert pg.locator("#msg.err").count() == 1
+    # right passcode: progress text + disabled button while running, then the pieces appear
+    pg.fill("#gen-pass", "sesame")
+    pg.locator("#btn-generate").tap()
+    assert pg.locator("#btn-generate").is_disabled()
+    assert "Generating" in pg.locator("#gen-status").inner_text()
+    pg.wait_for_function("I3DApp.state.model.length === 2")
+    assert pg.locator("#btn-generate").is_enabled()
+    assert pg.locator("#gen-status").inner_text().strip() == ""
+    assert rows(pg) == 2
+    assert pg.evaluate("localStorage.getItem('image3d.pass')") == "sesame"
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_generate_without_photo_asks_for_one(browser, live_server):
+    pg = new_page(browser, live_server)
+    pg.locator("#btn-generate").tap()
+    assert "photo" in pg.locator("#msg").inner_text().lower()
+    assert pg.locator("#msg.err").count() == 1
+    pg.context.close()

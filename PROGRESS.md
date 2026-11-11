@@ -190,3 +190,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NEXT: Task 4 (wire Generate button, server.py, render.yaml); publish the artifact.
 - BLOCKED: nothing.
 - 2026-11-11 Image3D Task 3 round-1 fixes: export saves `model.zip` via the artifact downloads API (declined = "Download cancelled", else plain `model.stl` link), cut plane only shown while cutting, size field shows current size, page scroll locked so the 3D view stays put. Browser tests 14 pass (Playwright at phone size, fake `window.claude`); NOT on a real phone and not against the real artifact API.
+
+### 2026-11-11 - Image3D Task 4: Render service (TI5)
+- DONE: `image3d/server.py` (FastAPI: `GET /` serves `image3d.html`, `GET /api/health`, `POST /api/generate` with check order 500 not configured, 401 passcode (constant-time), 400 not an image, 413 over 10 MB, 503 generator failure with the Space's reason; `generate_glb` via `gradio_client`, imported lazily, `token=` with `hf_token=` fallback; `GENERATOR` is swappable), `image3d/requirements.txt`, root `render.yaml` (free Python web service, `rootDir: image3d`, health check `/api/health`, `HF_TOKEN` / `IMAGE3D_PASSCODE` secrets), `image3d/DEPLOY.md` (phone steps + troubleshooting). Page: Generate button posts the photo, shows progress text and disables itself while running, shows the server's `detail` in the message line on errors, opens the result with `openBytes('generated.glb', ...)`; `image3d.html` rebuilt.
+- Tests: `image3d/tests/test_server.py` (14, includes a fake `gradio_client`) and two new browser tests (uvicorn + fake generator); whole `image3d/tests` suite 56 pass.
+- Verification: desktop-tested with a FAKE generator; live Hugging Face call and Render deploy NOT verified (endpoint auto-pick and result parsing are guesses about the Space's API until TI7).
+- NEXT: controller publishes the editor as an artifact (the part of TI5 not done here); then TI6 / TI7 (Jacob).
+- BLOCKED: nothing.

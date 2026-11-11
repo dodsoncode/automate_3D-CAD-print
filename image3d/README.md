@@ -5,4 +5,5 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 - `index.html` - the page (needs `js/` and `../gui/vendor/`); `python image3d/build.py` bundles it into one file, `image3d.html`, which works from any directory and as a claude.ai artifact.
 - `js/` - mesh maths and file readers (`mesh.js`, `stl.js`, `glb.js`, `obj.js`, `readany.js`).
 - No model yet? Generate one from a photo on a Hugging Face Space (Hunyuan3D-2.1 or TRELLIS), download the GLB, then open it here.
+- `server.py` + `../render.yaml` - small FastAPI app for Render: serves the page and adds photo -> GLB through a Hugging Face Space (`POST /api/generate`). Steps for a phone: `DEPLOY.md`.
 - Tests: `python -m pytest -q image3d/tests` (browser tests at 390 px wide need Playwright + Chromium).
