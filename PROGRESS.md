@@ -182,3 +182,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: script-checked only (Node under pytest, on generated samples). Not tried on a real Hunyuan3D/TRELLIS GLB, in a browser or on a phone.
 - NEXT: Task 3 (editor page + artifact).
 - BLOCKED: nothing.
+
+### 2026-11-11 - Image3D Task 3: editor page, single-file build, browser tests (TI4)
+- DONE: `image3d/index.html` (phone layout: 3D view on top ~45%, tools below; open GLB/OBJ/STL, piece list, tap-to-select in list or view, delete / keep largest / remove tiny bits, size, rotate, lay flat, cut with live plane preview, undo (20), closed / bed / piece-count checks, STL export via `claude.use('downloads')` then Blob link fallback, hidden `#gen-panel`, "How to get a model" note), `image3d/build.py` -> `image3d/image3d.html` (one self-contained file, committed), `image3d/README.md`, new sample `unit_box.glb`.
+- Tests: `image3d/tests/test_page.py` - 8 pass (Playwright, 390 x 844, touch); whole `image3d/tests` suite 34 pass.
+- Verification: desktop browser at phone size (Playwright); NOT on a real phone. The artifact downloads call (`saveViaClaude`) is a guess at the API and untested; the Blob fallback is what the tests exercise. Not yet published as an artifact (controller does that).
+- NEXT: Task 4 (wire Generate button, server.py, render.yaml); publish the artifact.
+- BLOCKED: nothing.

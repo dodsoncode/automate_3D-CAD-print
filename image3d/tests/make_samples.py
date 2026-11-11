@@ -75,6 +75,8 @@ def main():
          {"mesh": 1}], [(big, "H"), (small, "B")], "scaled.glb")
     # box 10 (x) by 30 (y, up) by 20 (z) -> 10 x 20 x 30 after the Y-up to Z-up conversion
     glb([{"mesh": 0}], [(corners(10, 30, 20, 0, 0, 0), "H")], "box_yup.glb")
+    # 1 unit cube (Y-up height 1): too small, so the editor rescales it to 100 mm
+    glb([{"mesh": 0}], [(corners(1, 1, 1, 0, 0, 0), "H")], "unit_box.glb")
     both = [big, corners(10, 10, 10, 50, 0, 0)]
     obj(both, "two_cubes.obj")
     stl(both, "two_cubes.stl")
