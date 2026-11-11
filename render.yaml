@@ -14,6 +14,8 @@ services:
       - key: IMAGE3D_PASSCODE
         sync: false
       - key: HF_SPACE
-        value: tencent/Hunyuan3D-2.1
+        value: tencent/Hunyuan3D-2
       - key: HF_API_NAME
-        value: ""
+        value: /shape_generation
+      - key: HF_IMAGE_PARAM
+        value: image

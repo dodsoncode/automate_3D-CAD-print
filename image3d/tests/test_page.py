@@ -248,6 +248,7 @@ sys.path.insert(0, %r)
 import server
 glb = open(%r, 'rb').read()
 def fake(image, name):
+    open(sys.argv[2], 'wb').write(name.encode() + b'\\n' + image)
     time.sleep(1.0)
     return glb
 server.GENERATOR = fake
@@ -255,8 +256,35 @@ uvicorn.run(server.app, host='127.0.0.1', port=int(sys.argv[1]), log_level='warn
 """ % (I3D, os.path.join(SAMPLES, "two_cubes.glb"))
 
 
+def big_png(w, h):
+    """A w x h grey PNG made with the standard library only."""
+    import struct
+    import zlib
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    raw = b"".join(b"\0" + bytes((x * 255 // w) for x in range(w)) for _ in range(h))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def jpeg_size(b):
+    """(width, height) from the first SOF marker of a JPEG."""
+    i = 2
+    while i < len(b):
+        marker, ln = b[i + 1], int.from_bytes(b[i + 2:i + 4], "big")
+        if marker in (0xC0, 0xC1, 0xC2):
+            return int.from_bytes(b[i + 7:i + 9], "big"), int.from_bytes(b[i + 5:i + 7], "big")
+        i += 2 + ln
+    raise ValueError("no SOF")
+
+
 @pytest.fixture(scope="module")
-def live_server():
+def record_file(tmp_path_factory):
+    return str(tmp_path_factory.mktemp("rec") / "received.bin")
+
+
+@pytest.fixture(scope="module")
+def live_server(record_file):
     pytest.importorskip("fastapi")
     import socket
     import time
@@ -266,7 +294,7 @@ def live_server():
     port = s.getsockname()[1]
     s.close()
     env = dict(os.environ, IMAGE3D_PASSCODE="sesame", HF_TOKEN="hf_fake")
-    proc = subprocess.Popen([sys.executable, "-c", LAUNCH, str(port)], env=env)
+    proc = subprocess.Popen([sys.executable, "-c", LAUNCH, str(port), record_file], env=env)
     url = "http://127.0.0.1:%d/" % port
     try:
         for _ in range(100):
@@ -313,4 +341,35 @@ def test_generate_without_photo_asks_for_one(browser, live_server):
     pg.locator("#btn-generate").tap()
     assert "photo" in pg.locator("#msg").inner_text().lower()
     assert pg.locator("#msg.err").count() == 1
+    pg.context.close()
+
+
+def test_large_photo_is_downsized_to_jpeg_before_upload(browser, live_server, record_file):
+    original = big_png(2000, 1500)
+    pg = new_page(browser, live_server)
+    pg.set_input_files("#gen-photo", {"name": "big.png", "mimeType": "image/png", "buffer": original})
+    pg.fill("#gen-pass", "sesame")
+    pg.locator("#btn-generate").tap()
+    pg.wait_for_function("I3DApp.state.model.length === 2")
+    with open(record_file, "rb") as f:
+        name, _, received = f.read().partition(b"\n")
+    assert name == b"photo.jpg"
+    assert received[:2] == b"\xff\xd8"  # JPEG, so the upload's content type was image/jpeg
+    w, h = jpeg_size(received)
+    assert max(w, h) == 1024 and min(w, h) == 768
+    assert len(received) < len(original) or len(received) < 200000
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_undecodable_photo_uploads_the_original(browser, live_server, record_file):
+    junk = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+    pg = new_page(browser, live_server)
+    pg.set_input_files("#gen-photo", {"name": "junk.png", "mimeType": "image/png", "buffer": junk})
+    pg.fill("#gen-pass", "sesame")
+    pg.locator("#btn-generate").tap()
+    pg.wait_for_function("I3DApp.state.model.length === 2")
+    with open(record_file, "rb") as f:
+        name, _, received = f.read().partition(b"\n")
+    assert name == b"junk.png" and received == junk
     pg.context.close()

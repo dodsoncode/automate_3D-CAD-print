@@ -2082,14 +2082,38 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor
   var generating = false;
   function setGenerating(on, text) { generating = on; $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
+  // downsize the photo before upload: longest side <= 1024 px, JPEG 0.9; the original file if decoding fails
+  function shrinkPhoto(file) {
+    return new Promise(function (resolve) {
+      var url = null, done = false;
+      function finish(v) { if (done) return; done = true; if (url) URL.revokeObjectURL(url); resolve(v); }
+      try {
+        url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, 1024 / Math.max(w, h));
+            if (!w || !h) return finish(file);
+            var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+            var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+            c.toBlob(function (b) { if (!b) return finish(file); try { finish(new File([b], 'photo.jpg', { type: 'image/jpeg' })); } catch (e) { b.name = 'photo.jpg'; finish(b); } }, 'image/jpeg', 0.9);
+          } catch (e) { finish(file); }
+        };
+        img.onerror = function () { finish(file); };
+        img.src = url;
+      } catch (e) { finish(file); }
+    });
+  }
   $('btn-generate').addEventListener('click', function () {
     if (generating) return;
     var file = $('gen-photo').files && $('gen-photo').files[0];
     if (!file) { msg('Choose a photo first.', true); return; }
-    var fd = new FormData(); fd.append('image', file, file.name || 'photo.jpg');
     setGenerating(true, 'Generating... this can take a minute or two');
     msg('');
-    fetch('api/generate', { method: 'POST', headers: { 'X-Passcode': $('gen-pass').value }, body: fd })
+    shrinkPhoto(file).then(function (up) {
+      var fd = new FormData(); fd.append('image', up, up.name || 'photo.jpg');
+      return fetch('api/generate', { method: 'POST', headers: { 'X-Passcode': $('gen-pass').value }, body: fd });
+    })
       .then(function (r) {
         if (r.ok) return r.arrayBuffer().then(function (buf) { setGenerating(false); openBytes('generated.glb', new Uint8Array(buf)); });
         return r.json().then(function (j) { return j && j.detail; }, function () { return null; })

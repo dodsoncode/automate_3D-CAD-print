@@ -20,6 +20,11 @@ with open(os.path.join(HERE, "samples", "two_cubes.glb"), "rb") as f:
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 
 
+@pytest.fixture(autouse=True)
+def clean_throttle():
+    server.reset_throttle()
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("IMAGE3D_PASSCODE", "sesame")
@@ -98,7 +103,7 @@ def test_wrong_passcode_beats_bad_image(client):
 
 
 def _fake_gradio(monkeypatch, tmp_path, new_style):
-    """A fake gradio_client: checks endpoint auto-pick, token keyword fallback and .glb extraction."""
+    """A fake gradio_client: checks the keyword call, token keyword fallback and the dict-shaped result."""
     import types
     glb_path = tmp_path / "out.glb"
     glb_path.write_bytes(GLB)
@@ -107,34 +112,190 @@ def _fake_gradio(monkeypatch, tmp_path, new_style):
     class Job:
         def result(self, timeout=None):
             calls["timeout"] = timeout
-            return [{"value": "x.png"}, ("meta", {"path": str(glb_path)})]
+            return [{"value": str(glb_path), "__type__": "update"}, {"value": None}, "stats", 42]
 
     class Client:
         def __init__(self, space, token=None, hf_token=None):
             if new_style and hf_token is not None or not new_style and token is not None:
                 raise TypeError("unexpected keyword")
-            calls["token"] = token or hf_token
+            calls["space"], calls["token"] = space, token or hf_token
 
         def view_api(self, return_format=None):
             return {"named_endpoints": {
                 "/health": {"parameters": []},
                 "/image_to_shape": {"parameters": [{"component": "Image"}]}}}
 
-        def submit(self, arg, api_name=None):
-            calls["api_name"] = api_name
+        def submit(self, *args, api_name=None, **kwargs):
+            calls["api_name"], calls["args"], calls["kwargs"] = api_name, args, kwargs
             return Job()
 
     mod = types.ModuleType("gradio_client")
-    mod.Client, mod.handle_file = Client, lambda p: p
+    mod.Client, mod.handle_file = Client, lambda p: "FILE:" + os.path.basename(p)
     monkeypatch.setitem(sys.modules, "gradio_client", mod)
     monkeypatch.setenv("HF_TOKEN", "hf_fake")
-    monkeypatch.delenv("HF_API_NAME", raising=False)
+    for v in ("HF_API_NAME", "HF_SPACE", "HF_IMAGE_PARAM"):
+        monkeypatch.delenv(v, raising=False)
     return calls
 
 
 @pytest.mark.parametrize("new_style", [True, False])
 def test_generate_glb_with_fake_gradio_client(monkeypatch, tmp_path, new_style):
     calls = _fake_gradio(monkeypatch, tmp_path, new_style)
-    out = server.generate_glb(PNG, "photo.png")
-    assert out == GLB
-    assert calls == {"token": "hf_fake", "api_name": "/image_to_shape", "timeout": 300}
+    assert server.generate_glb(PNG, "photo.png") == GLB
+    assert calls == {"space": "tencent/Hunyuan3D-2", "token": "hf_fake", "api_name": "/shape_generation",
+                     "args": (), "kwargs": {"image": "FILE:photo.png"}, "timeout": 300}
+
+
+def test_generate_glb_image_param_and_space_from_env(monkeypatch, tmp_path):
+    calls = _fake_gradio(monkeypatch, tmp_path, True)
+    monkeypatch.setenv("HF_IMAGE_PARAM", "input_image")
+    monkeypatch.setenv("HF_SPACE", "someone/other")
+    monkeypatch.setenv("HF_API_NAME", "/gen")
+    server.generate_glb(PNG, "photo.jpg")
+    assert calls["kwargs"] == {"input_image": "FILE:photo.jpg"}
+    assert (calls["space"], calls["api_name"]) == ("someone/other", "/gen")
+
+
+def test_generate_glb_empty_api_name_autopicks(monkeypatch, tmp_path):
+    calls = _fake_gradio(monkeypatch, tmp_path, True)
+    monkeypatch.setenv("HF_API_NAME", "")
+    server.generate_glb(PNG, "photo.png")
+    assert calls["api_name"] == "/image_to_shape"
+
+
+def test_first_glb_shapes():
+    assert server._first_glb("/tmp/a/white_mesh.glb") == "/tmp/a/white_mesh.glb"
+    assert server._first_glb([None, {"value": "/t/m.glb", "__type__": "update"}]) == "/t/m.glb"
+    assert server._first_glb(("x", {"path": "/t/n.GLB"})) == "/t/n.GLB"
+    assert server._first_glb(["/t/a.png", 3]) is None
+
+
+# ---------- hardening ----------
+def test_docs_disabled(client):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404
+
+
+def test_error_detail_is_capped(client, monkeypatch):
+    def boom(image, name):
+        raise RuntimeError("x" * 1000)
+    monkeypatch.setattr(server, "GENERATOR", boom)
+    r = post(client)
+    assert r.status_code == 503
+    assert len(r.json()["detail"]) <= 300
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_throttle_locks_after_five_wrong_passcodes(client, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    for _ in range(5):
+        assert post(client, passcode="nope").status_code == 401
+    r = post(client, passcode="sesame")  # even the right one is refused while locked
+    assert r.status_code == 429
+    assert r.json()["detail"] == "too many attempts, try again later"
+    clock.t += 599
+    assert post(client).status_code == 429
+    clock.t += 2
+    assert post(client).status_code == 200
+
+
+def test_throttle_correct_passcode_resets_count(client):
+    for _ in range(4):
+        assert post(client, passcode="nope").status_code == 401
+    assert post(client).status_code == 200
+    for _ in range(4):
+        assert post(client, passcode="nope").status_code == 401
+    assert post(client).status_code == 200
+
+
+def test_throttle_old_failures_expire_and_ips_are_separate(client, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    for _ in range(4):
+        post(client, passcode="nope")
+    clock.t += 601
+    assert post(client, passcode="nope").status_code == 401  # the 4 old ones no longer count
+    assert post(client).status_code == 200
+    for _ in range(5):
+        client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "1.2.3.4, 10.0.0.1"})
+    assert client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "1.2.3.4"}).status_code == 429
+    assert post(client).status_code == 200  # another client (the socket peer) is not locked
+
+
+# ---------- body limits are enforced before the body is read ----------
+def run_asgi(headers, chunks, config=True):
+    """Call server.app directly. Returns (status, body, number of body chunks the app pulled)."""
+    import asyncio
+    pulled = []
+    sent = []
+
+    async def go():
+        it = iter(chunks)
+
+        async def receive():
+            pulled.append(1)
+            try:
+                c = next(it)
+            except StopIteration:
+                return {"type": "http.disconnect"}
+            return {"type": "http.request", "body": c, "more_body": True}
+
+        async def send(m):
+            sent.append(m)
+
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+                 "path": "/api/generate", "raw_path": b"/api/generate", "query_string": b"", "root_path": "",
+                 "scheme": "http", "server": ("t", 80), "client": ("9.9.9.9", 1),
+                 "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}
+        await server.app(scope, receive, send)
+
+    asyncio.run(go())
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return status, body, len(pulled)
+
+
+def test_wrong_passcode_with_huge_content_length_never_reads_body(client):
+    status, body, pulled = run_asgi(
+        {"content-length": str(5 * 1024**3), "content-type": "multipart/form-data; boundary=x", "x-passcode": "nope"},
+        [b"x" * 1000] * 3)
+    assert status == 401 and pulled == 0
+
+
+def test_not_configured_never_reads_body(client, monkeypatch):
+    monkeypatch.delenv("HF_TOKEN")
+    status, body, pulled = run_asgi({"content-length": "999999999", "x-passcode": "sesame"}, [b"x"])
+    assert status == 500 and pulled == 0 and b"server not configured" in body
+
+
+def test_huge_content_length_with_right_passcode_is_413_without_reading(client):
+    status, body, pulled = run_asgi(
+        {"content-length": str(5 * 1024**3), "content-type": "multipart/form-data; boundary=x", "x-passcode": "sesame"},
+        [b"x" * 1000])
+    assert status == 413 and pulled == 0
+
+
+def test_chunked_body_over_cap_stops_early(client):
+    chunk = b"x" * 65536
+    total_chunks = 400  # 25 MB offered, no Content-Length
+    status, body, pulled = run_asgi(
+        {"content-type": "multipart/form-data; boundary=x", "x-passcode": "sesame"}, [chunk] * total_chunks)
+    assert status == 413
+    assert pulled < total_chunks // 2
+
+
+def test_chunked_body_over_cap_via_client(client):
+    def gen():
+        for _ in range(200):
+            yield b"x" * 65536
+    r = client.post("/api/generate", content=gen(),
+                    headers={"X-Passcode": "sesame", "Content-Type": "multipart/form-data; boundary=x"})
+    assert r.status_code == 413

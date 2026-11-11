@@ -25,4 +25,9 @@ Status: the server code is tested only with a FAKE generator. The live Hugging F
 - First load takes about a minute: the free Render instance sleeps when idle and has to wake up. Reload after a minute.
 - Message mentions quota: the daily free GPU time on Hugging Face is used up. Try again later (it resets daily).
 - Message says wrong passcode: the passcode must match `IMAGE3D_PASSCODE` in Render exactly. Message says server not configured: `HF_TOKEN` or `IMAGE3D_PASSCODE` is missing in Render (Environment tab).
-- Space asleep, busy or errors: wait and retry, or switch Space. In Render open the service, Environment, and set `HF_SPACE` to another Space (for example `trellis-community/TRELLIS`). If the server cannot find the right endpoint, set `HF_API_NAME` to the Space's endpoint name (the Space page, "Use via API", shows names like `/generation_all`). Leave `HF_API_NAME` empty to auto-pick. Save; Render redeploys.
+- Too many attempts: after 5 wrong passcodes the server refuses that phone for 10 minutes. Wait, then type the right passcode.
+- Space asleep, busy or errors: wait and retry, or switch Space. The default is `tencent/Hunyuan3D-2` with the endpoint `/shape_generation`, which makes the shape only (no texture). That suits printing. To switch, open the service in Render, Environment, and set the three values together, then save (Render redeploys):
+  - `HF_SPACE`: the Space name, for example `owner/space-name`.
+  - `HF_API_NAME`: the endpoint name from the Space page ("Use via API"), for example `/shape_generation`. Setting it to an empty value makes the server guess an endpoint, which is a fallback and is not reliable.
+  - `HF_IMAGE_PARAM`: the name of the endpoint's photo input (default `image`).
+  A different Space may need code changes if its inputs or outputs differ. The live call is NOT verified, for this or any other Space.
