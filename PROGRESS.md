@@ -175,3 +175,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: script-checked only (Node under pytest). Not tried on a real generated mesh, in a browser or on a phone.
 - NEXT: Task 2 (file readers: GLB/OBJ/STL into shells).
 - BLOCKED: nothing.
+
+### 2026-11-11 - Image3D Task 2: file readers (glb.js, obj.js, readany.js)
+- DONE: `image3d/js/glb.js` (`I3D.glb.read`: GLB container, embedded BIN, float POSITION incl. strided, indices of any integer type or none, triangle mode only, node hierarchy with matrix or TRS, several meshes, glTF Y-up -> Z-up; throws `compressed` for Draco/meshopt and `not a GLB file` on bad magic), `image3d/js/obj.js` (`I3D.obj.read`: v/f, `v/vt/vn` forms, negative indices, fan triangulation) and `image3d/js/readany.js` (`I3D.readAny(name, bytes)` by case-insensitive extension; `module.exports = readAny` in Node; throws `unsupported file`). `image3d/tests/make_samples.py` (standard library only) writes the committed samples in `image3d/tests/samples/` (`two_cubes.glb/.obj/.stl`, `scaled.glb`, `box_yup.glb`).
+- Tests: `image3d/tests/test_readers.py` - 8 pass; whole `image3d/tests` suite 26 pass (~4 s).
+- Verification: script-checked only (Node under pytest, on generated samples). Not tried on a real Hunyuan3D/TRELLIS GLB, in a browser or on a phone.
+- NEXT: Task 3 (editor page + artifact).
+- BLOCKED: nothing.
