@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor): spec written, awaiting Jacob's review
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -154,3 +154,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 ### 2026-10-21 - Step: merge PRs #6 and #5
 - DONE: PR #6 (hexapod + windmill rover styles) merged to `main` at Jacob's request. PR #5 (log of PR #4) had conflicts in PROGRESS.md; resolved by keeping both sets of entries, then merged.
 - NEXT: Jacob's items TS6, TK6-TK9, T1.1 in TASKS.md.
+
+### 2026-11-11 - Image3D step 1: design spec
+- DONE: `docs/superpowers/specs/2026-11-11-image3d-design.md` - design for a browser tool (`image3d/`): photo -> Hugging Face Space (Hunyuan3D / TRELLIS) -> edit (delete piece, size, orient, cut) -> STL. Web-checked: Meshy's API needs a paid plan; Hugging Face free accounts get a small daily GPU quota. Nothing built or tested yet.
+- NEXT: Jacob reviews the spec; then implementation plan and build (TI2-TI6).
+- BLOCKED: live Hugging Face generation cannot be tested from Claude's workspace (needs Jacob's token).

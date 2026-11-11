@@ -92,3 +92,11 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] TS4 Walker Designer: style picker, per-style preview/animation/sliders/export; rebuild and republish
 - [x] TS5 Firmware + MakeCode support for hexapod and wheg rover, tests
 - [ ] TS6 (J) Buy 4 FS90R (and 4 more MG90S for hexapod); trim each FS90R to stop at 1500 us; print one wheg and test fit
+
+## Image to 3D editor (`image3d/`, added 2026-11-11)
+- [x] TI1 Design spec (`docs/superpowers/specs/2026-11-11-image3d-design.md`)
+- [ ] TI2 (J) Review the spec
+- [ ] TI3 (C) `mesh.js` + `stl.js` with Node tests (split, delete, scale, lay flat, cut, closed check)
+- [ ] TI4 (C) Editor page + loaders + single-file build, browser test
+- [ ] TI5 (C) Hugging Face generator (browser) + `generate.py` fallback
+- [ ] TI6 (J) Make a Hugging Face token; run one photo through; report result (first real verification of generation)
