@@ -85,6 +85,17 @@ def test_generate_space_busy(client, monkeypatch):
     assert "quota" in r.json()["detail"]
 
 
+def test_bad_extra_settings_is_a_configuration_error(client, monkeypatch):
+    # a broken HF_EXTRA_JSON is a setup mistake: 500 before the generator (or the Space) is touched, not a 503
+    ran = []
+    monkeypatch.setattr(server, "GENERATOR", lambda data, name: ran.append(1) or GLB)
+    monkeypatch.setenv("HF_EXTRA_JSON", "not json")
+    r = post(client)
+    assert r.status_code == 500
+    assert "server not configured" in r.json()["detail"] and "HF_EXTRA_JSON" in r.json()["detail"]
+    assert ran == []
+
+
 @pytest.mark.parametrize("var", ["IMAGE3D_PASSCODE", "HF_TOKEN"])
 def test_not_configured(client, monkeypatch, var):
     monkeypatch.delenv(var)

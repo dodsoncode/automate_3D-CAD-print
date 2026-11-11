@@ -235,3 +235,15 @@ console.log(JSON.stringify(out));""" % fx)
     for keep in ("below", "above"):
         assert r[keep]["open"] == 0, keep          # every edge on the cut plane is shared by wall and cap
         assert abs(r[keep]["cap"] - r["want"]) < 1e-6 * r["want"], keep   # the cap covers exactly outline minus cavity
+
+
+def test_cut_cap_fuzz_grid_holes_and_pinch_points():
+    # fuzz_cut.js: grid-aligned holes with exactly collinear points, and cross-sections that pinch to a point,
+    # each in random triangle order. Found by review after the first live run; every cut must leave no open edge
+    # on the cut plane and a cap of exactly the right area.
+    r = subprocess.run(["node", os.path.join(HERE, "fuzz_cut.js"), "3", "60"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(r.stdout)
+    assert set(rep) == {"gridHoles", "bowtie", "holeTouchesOutline", "holeTouchesHole", "collinearPinch"}
+    for name, s in rep.items():
+        assert s["runs"] == 120 and s["fails"] == 0, (name, s["first"])

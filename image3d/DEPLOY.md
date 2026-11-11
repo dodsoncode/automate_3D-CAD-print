@@ -24,9 +24,10 @@ Status: the Hugging Face call was run for real on 2026-11-11 from Claude's works
 ## Troubleshooting
 - First load takes about a minute: the free Render instance sleeps when idle and has to wake up. Reload after a minute.
 - Message mentions quota: the daily free GPU time on Hugging Face is used up. Try again later (it resets daily).
+- Message says server not configured: HF_EXTRA_JSON: that value in Render is not a valid JSON object; the default is `{"octree_resolution": 128}`.
 - Message says wrong passcode: the passcode must match `IMAGE3D_PASSCODE` in Render exactly. Message says server not configured: `HF_TOKEN` or `IMAGE3D_PASSCODE` is missing in Render (Environment tab).
 - Message says too many attempts: wait 10 minutes and try again. After 5 wrong passcodes the server refuses that phone for 10 minutes, and if many wrong passcodes arrive from anywhere it refuses everyone for a while.
-- Space asleep, busy or errors: wait and retry, or switch Space. The default is `tencent/Hunyuan3D-2` with the endpoint `/shape_generation`, which makes the shape only (no texture). That suits printing. To switch, open the service in Render, Environment, and set the three values together, then save (Render redeploys):
+- Space asleep, busy or errors: wait and retry, or switch Space. The default is `tencent/Hunyuan3D-2` with the endpoint `/shape_generation`, which makes the shape only (no texture). That suits printing. To switch, open the service in Render, Environment, and set these four values together, then save (Render redeploys):
   - `HF_SPACE`: the Space name, for example `owner/space-name`.
   - `HF_API_NAME`: the endpoint name from the Space page ("Use via API"), for example `/shape_generation`. Setting it to an empty value makes the server guess an endpoint, which is a fallback and is not reliable.
   - `HF_IMAGE_PARAM`: the name of the endpoint's photo input (default `image`).

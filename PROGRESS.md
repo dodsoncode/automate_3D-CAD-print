@@ -225,3 +225,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Checked: 114 cuts across x/y/z on the 917k model and 54 on the 113k model: all closed, volume conserved to 5e-12. Page opened the real model at phone size in 0.9 s and cut it watertight. `image3d/tests` + `gui/tests`: 113 passed.
 - Verification level: script-checked and desktop-tested with REAL generated models. Still NOT verified: Render deploy, a real phone.
 - NEXT: Jacob - deploy on Render (TI7) and try on the phone (TI6). Jacob's token appeared in the chat; suggest replacing it after setup.
+
+### 2026-11-11 - Image3D: review of the cut fix, three more cases closed
+- DONE: independent review of the earcut change found open caps in three situations not covered by the real models: boundary points on exactly straight runs when earcut's hole bridge lands on an existing edge (grid-aligned holes), cross-sections that pinch to a point (shared vertex between loops), and loop nesting probed at a shared vertex. FIX: coordinates handed to earcut are nudged by about 1e-9 of the size (same point, same nudge; real coordinates and ids unchanged); nesting is probed at a vertex no other loop shares. `image3d/tests/fuzz_cut.js` added (grid holes + four pinch shapes, random triangle order): before the fix 297 of 1000 failed, after it 0 of 9000 (three seeds). A broken `HF_EXTRA_JSON` now answers 500 "server not configured" before anything is uploaded.
+- Verification level: script-checked (fuzz + regression tests) and re-checked on the two real generated models. Both real models came from one test picture and one Space, so other pictures are still untested. Render and a real phone: NOT verified.
+- NEXT: PR for branch `image3d-real-mesh-fixes`; Jacob - TI7, TI6.

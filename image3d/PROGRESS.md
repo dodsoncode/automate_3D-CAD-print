@@ -2,7 +2,7 @@
 
 Everything done on the photo -> 3D -> STL tool, in order, with what was checked and what was not.
 The repo-wide log is [`../PROGRESS.md`](../PROGRESS.md); tasks are TI1-TI7 in [`../TASKS.md`](../TASKS.md).
-Times are US Central on 2026-11-11. Commits are on branch `image3d-tool`.
+Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-tool` (merged as PR #7); step 15 is on branch `image3d-real-mesh-fixes`.
 
 ## Where it stands
 
@@ -121,8 +121,12 @@ second **free Render** service next to the mental fitness app.
 - Problem 2: cutting the real model left it open. Cause: the hand-written cap triangulation failed on the real
   cross-section (an outline with a cavity inside). Fix: caps now use the earcut library (vendored), and the
   failing cross-section is kept as a test fixture.
-- Checked on real models: 168 cuts along all three axes, all closed; the page opened and cut a real model at
-  phone size. Not yet checked: Render and a real phone.
+- A review of that fix then found three more ways a cap could come out open (points on exactly straight runs,
+  holes on a grid, cross-sections that pinch to a point). Fixed by nudging the coordinates given to earcut by
+  about one part in a billion and by testing loop nesting at a point no other loop shares. A fuzz test
+  (`tests/fuzz_cut.js`) now covers these: 9,000 random cuts, 0 failures.
+- Checked on real models: 168 cuts along all three axes on two models made from one test picture, all closed.
+  The page opened and cut a real model at phone size. Not yet checked: Render, a real phone, other pictures.
 
 ## What Jacob does next
 

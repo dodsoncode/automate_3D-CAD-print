@@ -107,6 +107,10 @@ class GenerateGuard:
         passcode, token = os.environ.get("IMAGE3D_PASSCODE"), os.environ.get("HF_TOKEN")
         if not passcode or not token:
             return await reply(500, "server not configured")
+        try:  # a broken HF_EXTRA_JSON is a setup mistake too: say so before anything is uploaded or generated
+            _extra_settings(os.environ.get("HF_SPACE") or DEFAULT_SPACE, os.environ.get("HF_IMAGE_PARAM") or "image")
+        except RuntimeError as e:
+            return await reply(500, "server not configured: %s" % e)
         ip = _client_key(scope, headers)
         if _global_locked() or _is_locked(ip):
             return await reply(429, "too many attempts, try again later")
