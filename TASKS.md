@@ -96,7 +96,7 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 ## Image to 3D editor (`image3d/`, added 2026-11-11)
 - [x] TI1 Design spec (`docs/superpowers/specs/2026-11-11-image3d-design.md`)
 - [x] TI2 (J) Review the spec - approved 2026-11-11
-- [ ] TI3 (C) `mesh.js` + `stl.js` with Node tests (split, delete, scale, lay flat, cut, closed check)
+- [x] TI3 (C) `mesh.js` + `stl.js` with Node tests (split, delete, scale, lay flat, cut, closed check)
 - [ ] TI4 (C) Editor page + loaders + single-file build, browser test
 - [ ] TI5 (C) `server.py` (FastAPI: serve page + `/api/generate` via Hugging Face) + `render.yaml`, tested with a fake generator; publish editor as artifact
 - [ ] TI6 (J) Try the artifact editor on the phone with a GLB from a Hugging Face Space page
