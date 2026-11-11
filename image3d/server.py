@@ -7,6 +7,7 @@ Env: HF_TOKEN (Hugging Face read token), IMAGE3D_PASSCODE (shared passcode),
      string to auto-pick an endpoint), HF_IMAGE_PARAM (default image: the keyword the endpoint takes the photo in).
 Everything is read per request, so the tests can set it with monkeypatch.
 """
+import concurrent.futures
 import hmac
 import os
 import tempfile
@@ -196,7 +197,15 @@ def generate_glb(image_bytes, filename):
         path = os.path.join(tmp, "photo" + suffix)
         with open(path, "wb") as f:
             f.write(image_bytes)
-        result = client.submit(api_name=api_name, **{param: handle_file(path)}).result(timeout=TIMEOUT_S)
+        job = client.submit(api_name=api_name, **{param: handle_file(path)})
+        try:
+            result = job.result(timeout=TIMEOUT_S)
+        except (TimeoutError, concurrent.futures.TimeoutError):
+            try:
+                job.cancel()
+            except Exception:
+                pass
+            raise
     glb = _first_glb(result)
     if not glb or not os.path.exists(glb):
         raise RuntimeError("the Space returned no .glb file")

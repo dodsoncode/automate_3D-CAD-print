@@ -241,6 +241,34 @@ def test_view_stays_in_viewport_when_tools_scroll(page):
     assert box[0] >= 0 and box[1] <= box[2] and box[1] - box[0] > 100
 
 
+def test_model_size_line_follows_the_model(page):
+    open_sample(page, "two_cubes.stl", rows=2)
+
+    def nums():
+        t = page.locator("#model-size").inner_text()
+        assert t.startswith("Model: ") and t.endswith(" mm")
+        return [float(x) for x in t[len("Model: "):-len(" mm")].split(" x ")]
+    bb = page.evaluate("I3D.mesh.bbox(I3DApp.state.model).size")
+    assert nums() == pytest.approx([round(v, 1) for v in bb], abs=1e-9)
+    page.fill("#size-mm", "100")
+    page.locator("#btn-size").tap()
+    assert max(nums()) == pytest.approx(100.0)
+    page.locator("#pieces [data-i]").nth(1).tap()
+    page.locator("#btn-delete").tap()
+    bb = page.evaluate("I3D.mesh.bbox(I3DApp.state.model).size")
+    assert nums() == pytest.approx([round(v, 1) for v in bb], abs=1e-9)
+
+
+def test_undo_limit_depends_on_triangle_count(page):
+    assert page.evaluate("I3DApp.undoLimit()") == 20
+    big = page.evaluate("""(() => { const m = I3DApp.state.model; I3DApp.state.model = [{v: [], t: new Array(100001 * 3).fill(0)}];
+      const n = I3DApp.undoLimit(); I3DApp.state.model = m; return n; })()""")
+    assert big == 5
+    edge = page.evaluate("""(() => { const m = I3DApp.state.model; I3DApp.state.model = [{v: [], t: new Array(100000 * 3).fill(0)}];
+      const n = I3DApp.undoLimit(); I3DApp.state.model = m; return n; })()""")
+    assert edge == 20
+
+
 # ---------- server mode (uvicorn + FAKE generator; no Hugging Face involved) ----------
 LAUNCH = """
 import sys, time, uvicorn
@@ -372,4 +400,40 @@ def test_undecodable_photo_uploads_the_original(browser, live_server, record_fil
     with open(record_file, "rb") as f:
         name, _, received = f.read().partition(b"\n")
     assert name == b"junk.png" and received == junk
+    pg.context.close()
+
+
+WAKE = """
+window.__wl = {req: 0, rel: 0};
+Object.defineProperty(navigator, 'wakeLock', {configurable: true, value: {
+  request: function (t) { window.__wl.req++; return Promise.resolve({release: function () { window.__wl.rel++; return Promise.resolve(); }}); }}});
+"""
+
+
+def test_generate_holds_a_wake_lock_while_running(browser, live_server):
+    pg = new_page(browser, live_server, WAKE)
+    pg.set_input_files("#gen-photo", {"name": "photo.png", "mimeType": "image/png", "buffer": b"\x89PNG\r\n\x1a\n" + b"\0" * 32})
+    pg.fill("#gen-pass", "sesame")
+    pg.locator("#btn-generate").tap()
+    assert "keep this screen open" in pg.locator("#gen-status").inner_text()
+    assert pg.evaluate("window.__wl") == {"req": 1, "rel": 0}
+    pg.wait_for_function("I3DApp.state.model.length === 2")
+    pg.wait_for_function("window.__wl.rel === 1")
+    assert pg.evaluate("window.__wl") == {"req": 1, "rel": 1}
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_any_fetch_typeerror_shows_the_friendly_message(browser, live_server):
+    pg = new_page(browser, live_server, WAKE + """
+      var realFetch = window.fetch;
+      window.fetch = function (u, o) { return String(u).indexOf('api/generate') >= 0 ? Promise.reject(new TypeError('Load failed')) : realFetch.apply(this, arguments); };""")
+    pg.set_input_files("#gen-photo", {"name": "photo.png", "mimeType": "image/png", "buffer": b"\x89PNG\r\n\x1a\n" + b"\0" * 32})
+    pg.fill("#gen-pass", "sesame")
+    pg.locator("#btn-generate").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('waking up')")
+    assert "Load failed" not in pg.locator("#msg").inner_text()
+    assert pg.locator("#btn-generate").is_enabled()
+    pg.wait_for_function("window.__wl.rel === 1")
+    assert pg.evaluate("window.__wl") == {"req": 1, "rel": 1}
     pg.context.close()

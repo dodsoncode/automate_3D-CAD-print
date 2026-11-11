@@ -11,7 +11,7 @@ Status: the server code is tested only with a FAKE generator. The live Hugging F
 ## B. Render
 1. Open dashboard.render.com and sign in (the same account as mental_stength is fine).
 2. Tap New, then Blueprint.
-3. Connect GitHub if asked, then pick the repo `dodsoncode/automate_3D-CAD-print`.
+3. Connect GitHub if asked, then pick the repo `dodsoncode/automate_3d-cad-print`.
 4. Choose the branch `main` (the Blueprint file `render.yaml` is at the repo root). Tap Continue.
 5. Render asks for two secret values. Set `HF_TOKEN` to the token from part A, and `IMAGE3D_PASSCODE` to a long passcode you invent, for example four random words. It is the only lock on your Hugging Face quota, so do not use a short or guessable one (you will type it on the page).
 6. Tap Apply / Deploy and wait for the deploy to say Live.

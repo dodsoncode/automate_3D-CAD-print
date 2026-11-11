@@ -110,8 +110,14 @@ def _fake_gradio(monkeypatch, tmp_path, new_style):
     calls = {}
 
     class Job:
+        def cancel(self):
+            calls["cancelled"] = calls.get("cancelled", 0) + 1
+            return True
+
         def result(self, timeout=None):
             calls["timeout"] = timeout
+            if calls.get("raise"):
+                raise calls["raise"]
             return [{"value": str(glb_path), "__type__": "update"}, {"value": None}, "stats", 42]
 
     class Client:
@@ -144,6 +150,15 @@ def test_generate_glb_with_fake_gradio_client(monkeypatch, tmp_path, new_style):
     assert server.generate_glb(PNG, "photo.png") == GLB
     assert calls == {"space": "tencent/Hunyuan3D-2", "token": "hf_fake", "api_name": "/shape_generation",
                      "args": (), "kwargs": {"image": "FILE:photo.png"}, "timeout": 300}
+
+
+def test_timeout_cancels_the_job_and_answers_503(client, monkeypatch, tmp_path):
+    calls = _fake_gradio(monkeypatch, tmp_path, True)
+    calls["raise"] = TimeoutError()
+    monkeypatch.setattr(server, "GENERATOR", server.generate_glb)
+    r = post(client)
+    assert r.status_code == 503
+    assert calls["cancelled"] == 1
 
 
 def test_generate_glb_image_param_and_space_from_env(monkeypatch, tmp_path):

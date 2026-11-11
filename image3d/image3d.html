@@ -54,6 +54,7 @@
     <div class="row"><button id="btn-small">Remove tiny bits</button><button id="btn-undo" disabled>Undo</button></div>
 
     <h2>Size (longest side, mm)</h2>
+    <div id="model-size"></div>
     <div class="row"><input type="number" id="size-mm" value="100" min="1" max="2000" step="1" inputmode="decimal" aria-label="Longest side in millimetres"><button id="btn-size" class="primary">Set size</button></div>
 
     <h2>Orient</h2>
@@ -1818,7 +1819,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   var M = I3D.mesh, $ = function (id) { return document.getElementById(id); };
   var AX = { x: 0, y: 1, z: 2 };
   var state = { model: [], selected: -1 };
-  var undoStack = [], MAXUNDO = 20, BED = 256, LIST_MAX = 30;
+  var undoStack = [], BED = 256, LIST_MAX = 30;
   var App = { state: state, serverMode: false };
 
   // ---------- messages ----------
@@ -1884,7 +1885,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     state.model.forEach(function (sh, i) {
       var g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sh.v), 3));
-      g.setIndex(sh.t.length > 65535 * 3 ? new THREE.Uint32BufferAttribute(sh.t, 1) : new THREE.Uint16BufferAttribute(sh.t, 1));
+      g.setIndex(sh.v.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(sh.t, 1) : new THREE.Uint16BufferAttribute(sh.t, 1));
       g.computeVertexNormals();
       var sel = i === state.selected;
       var m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: sel ? 0xf08c00 : 0x8aa4c8, roughness: 0.6, metalness: 0.05, flatShading: true, side: THREE.DoubleSide }));
@@ -1945,8 +1946,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     r.min = lo; r.max = hi; r.value = (lo + hi) / 2; updateCutLabel();
   }
   function refreshSize() {
-    if (!state.model.length) return;
-    var s = M.bbox(state.model).size; $('size-mm').value = fmt(Math.max(s[0], s[1], s[2]));
+    if (!state.model.length) { $('model-size').textContent = ''; return; }
+    var s = M.bbox(state.model).size;
+    $('model-size').textContent = 'Model: ' + fmt(s[0]) + ' x ' + fmt(s[1]) + ' x ' + fmt(s[2]) + ' mm';
+    $('size-mm').value = fmt(Math.max(s[0], s[1], s[2]));
   }
   function updateCutLabel() { $('cut-val').textContent = fmt(parseFloat($('cut-pos').value) || 0) + ' mm'; }
   function refresh() {
@@ -1956,10 +1959,15 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
 
   // ---------- model operations ----------
+  // undo memory: 20 steps up to 100,000 triangles in total, 5 steps above that
+  function undoLimit() {
+    var n = 0; state.model.forEach(function (sh) { n += sh.t.length / 3; });
+    return n > 100000 ? 5 : 20;
+  }
   function apply(fn, okMsg) {
     var next;
     try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : String(e.message || e), true); return false; }
-    undoStack.push(state.model); if (undoStack.length > MAXUNDO) undoStack.shift();
+    undoStack.push(state.model); while (undoStack.length > undoLimit()) undoStack.shift();
     state.model = next; state.selected = -1;
     refresh(); msg(okMsg || '');
     return true;
@@ -2081,7 +2089,25 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor
   var generating = false;
-  function setGenerating(on, text) { generating = on; $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
+  var wakeLock = null;
+  function holdWake() {
+    try {
+      if (!generating || wakeLock || !navigator.wakeLock) return;
+      var p = navigator.wakeLock.request('screen');
+      if (!p || !p.then) return;
+      wakeLock = true; // claimed now so a second call cannot request again
+      p.then(function (l) { if (generating) wakeLock = l; else { wakeLock = null; try { l.release(); } catch (e) { /* ignore */ } } },
+        function () { wakeLock = null; });
+    } catch (e) { wakeLock = null; }
+  }
+  function dropWake() {
+    var l = wakeLock; wakeLock = null;
+    try { if (l && l.release) l.release(); } catch (e) { /* ignore */ }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { if (wakeLock && wakeLock !== true) wakeLock = null; holdWake(); }
+  });
+  function setGenerating(on, text) { generating = on; if (on) holdWake(); else dropWake(); $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
   // downsize the photo before upload: longest side <= 1024 px, JPEG 0.9; the original file if decoding fails
   function shrinkPhoto(file) {
     return new Promise(function (resolve) {
@@ -2108,7 +2134,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (generating) return;
     var file = $('gen-photo').files && $('gen-photo').files[0];
     if (!file) { msg('Choose a photo first.', true); return; }
-    setGenerating(true, 'Generating... this can take a minute or two');
+    setGenerating(true, 'Generating... keep this screen open (about a minute or two)');
     msg('');
     shrinkPhoto(file).then(function (up) {
       var fd = new FormData(); fd.append('image', up, up.name || 'photo.jpg');
@@ -2119,12 +2145,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         return r.json().then(function (j) { return j && j.detail; }, function () { return null; })
           .then(function (d) { throw new Error(typeof d === 'string' && d ? d : 'Server error ' + r.status); });
       })
-      .catch(function (e) { setGenerating(false); msg(String(e && e.message || e) === 'Failed to fetch' ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e), true); });
+      .catch(function (e) { setGenerating(false); msg(e instanceof TypeError ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e), true); });
   });
 
   initView();
   refresh();
-  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
+  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
   App.ready = checkServer();
   window.I3DApp = App;
 })();

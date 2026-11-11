@@ -93,9 +93,29 @@ second **free Render** service next to the mental fitness app.
   with the download permission declared. Its link is in the Claude chat, not in this repo.
 - Not verified: opening it and exporting inside the real Claude app.
 
-### Step 12 - Task 5: docs, full test run, PR (in progress when this file was written)
-- README updates, full test run across `image3d/`, `gui/` and `firmware/`, a whole-branch review, then a PR to
-  `main` (not merged until Jacob says so). See `../PROGRESS.md` for the result.
+### Step 12 - Task 5 docs, full test run, whole-branch review (final fix wave)
+- Task 5 docs done and the full test run passed: 101 passed (image3d + gui), 39 passed (firmware).
+- Whole-branch review: no critical findings. One important finding, fixed in this wave: a phone that locks its
+  screen can drop the generate request, so the page now keeps the screen awake while generating (screen wake
+  lock, released afterwards, re-requested if the page becomes visible again) and any network `TypeError` from
+  `fetch` shows the friendly "server may be waking up" message.
+- Also fixed: `requirements.txt` pinned to the installed major versions; a timed-out Space job is cancelled
+  before the 503; the 3D view picks 32-bit indices by vertex count (over 65535) instead of triangle count;
+  the Size section shows the whole model's X x Y x Z in mm; undo keeps 20 steps up to 100,000 triangles and 5
+  above that; `DEPLOY.md` names the repo as Render shows it (`dodsoncode/automate_3d-cad-print`).
+- Verification: desktop browser at phone size with a STUBBED wake lock, fake generator and fake
+  `gradio_client`; NOT on a real phone, not against the live Space or Render. The 32-bit index choice is covered
+  by reading only (no browser test).
+
+### Step 13 - PR
+- The PR to `main` is opened by the controller and is not merged until Jacob says so.
+
+### Known limits (can wait)
+- Cap triangulation is quadratic on extreme cross-sections.
+- Quantized, mirrored or strip GLBs are not supported.
+- Selecting a piece redraws everything, which is slow on huge models.
+- The server keeps temporary GLBs until it restarts.
+- If the phone still drops long requests, the next step is submit-then-poll.
 
 ## What Jacob does next
 

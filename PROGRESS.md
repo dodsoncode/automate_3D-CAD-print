@@ -205,3 +205,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: mesh maths and readers script-checked; page tested in a desktop browser at phone size (Playwright), NOT on a real phone; server tested with a FAKE generator. NOT verified: the live Hugging Face call, the Render deploy, and the artifact's `model.zip` download inside the real Claude app.
 - NEXT: Jacob does TI6 (try the artifact editor on the phone with a GLB from a Hugging Face Space page) and TI7 (Hugging Face token + Render deploy, one photo through). Controller pushes the branch and opens the PR to `main` (not merged).
 - BLOCKED: nothing.
+
+### 2026-11-11 - Image3D final fix wave (whole-branch review)
+- DONE: keep the screen awake while generating (wake lock, re-requested on return, released in the end) with status "Generating... keep this screen open (about a minute or two)"; any `TypeError` from `fetch` shows the friendly "server may be waking up" message; `requirements.txt` pinned to installed majors; timed-out Space job is cancelled before the 503; 32-bit mesh indices chosen by vertex count (> 65535); Size section shows the whole model's X x Y x Z (`#model-size`); undo limit 20 up to 100,000 triangles, 5 above (`I3DApp.undoLimit()`); `DEPLOY.md` repo name `dodsoncode/automate_3d-cad-print`; `image3d/PROGRESS.md` Step 12 rewritten, Step 13 and known limits added; `image3d.html` rebuilt.
+- Tests: `python -m pytest -q image3d/tests` 81 pass (5 new tests).
+- Verification: desktop browser at phone size with a STUBBED wake lock, fake generator and fake `gradio_client`; NOT on a real phone, not the live Space or Render. The 32-bit index change is covered by reading only.
+- NEXT: controller opens the PR to `main`; not merged until Jacob says so.
+- BLOCKED: nothing.
