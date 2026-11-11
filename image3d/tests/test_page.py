@@ -36,9 +36,11 @@ def browser():
         b.close()
 
 
-def new_page(browser, url):
+def new_page(browser, url, init=None):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, accept_downloads=True)
     pg = ctx.new_page()
+    if init:
+        pg.add_init_script(init)
     pg.set_default_timeout(8000)
     pg.errors = []
     pg.on("pageerror", lambda e: pg.errors.append(str(e)))
@@ -159,3 +161,81 @@ def test_built_single_file(browser, tmp_path):
     open_sample(pg, "two_cubes.glb", rows=2)
     assert pg.errors == []
     pg.context.close()
+
+
+FAKE_SAVE = """window.claude = {use: async (n) => ({save: async (a) => { window.__saved = a; return {status: 'saved'}; }})};"""
+FAKE_DECLINE = """window.claude = {use: async (n) => ({save: async (a) => { throw {code: 'declined', message: 'no'}; }})};"""
+FAKE_NULL = """window.claude = {use: async (n) => null};"""
+
+
+def prep_cube(pg):
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-keep-largest").tap()
+    pg.wait_for_function("document.querySelectorAll('#pieces [data-i]').length === 1")
+
+
+def test_export_via_artifact_downloads_zip(browser, server):
+    pg = new_page(browser, server, FAKE_SAVE)
+    prep_cube(pg)
+    pg.locator("#btn-export").tap()
+    pg.wait_for_function("window.__saved")
+    res = pg.evaluate("""(async () => {
+      const a = window.__saved, z = await JSZip.loadAsync(a.data), names = Object.keys(z.files);
+      const bytes = await z.files['model.stl'].async('uint8array'), m = I3D.mesh;
+      const shells = m.split(m.weld(I3D.stl.read(bytes)));
+      return {filename: a.filename, names, closed: shells.length === 1 && shells.every(m.isClosed)};
+    })()""")
+    assert res == {"filename": "model.zip", "names": ["model.stl"], "closed": True}
+    assert "Saved model.zip (contains model.stl)" in pg.locator("#msg").inner_text()
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_export_declined_shows_cancelled_without_fallback(browser, server):
+    pg = new_page(browser, server, FAKE_DECLINE)
+    prep_cube(pg)
+    downloads = []
+    pg.on("download", lambda d: downloads.append(d))
+    pg.locator("#btn-export").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('Download cancelled')")
+    pg.wait_for_timeout(500)
+    assert downloads == []
+    pg.context.close()
+
+
+def test_export_falls_back_when_downloads_unavailable(browser, server):
+    pg = new_page(browser, server, FAKE_NULL)
+    prep_cube(pg)
+    with pg.expect_download() as d:
+        pg.locator("#btn-export").tap()
+    assert d.value.suggested_filename == "model.stl"
+    pg.context.close()
+
+
+def test_cut_preview_only_while_cutting(page):
+    open_sample(page, "two_cubes.stl", rows=2)
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is False
+    page.evaluate("(()=>{const r=document.getElementById('cut-pos');r.value=r.min;r.dispatchEvent(new Event('input',{bubbles:true}));})()")
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is True
+    page.locator("#btn-cut").tap()
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is False
+    page.select_option("#cut-keep", "below")
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is True
+    page.locator("#btn-flat").tap()
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is False
+
+
+def test_size_field_shows_current_size(page):
+    open_sample(page, "two_cubes.stl", rows=2)
+    longest = page.evaluate("Math.max(...I3D.mesh.bbox(I3DApp.state.model).size)")
+    assert float(page.input_value("#size-mm")) == pytest.approx(round(longest, 1), abs=1e-9)
+    page.fill("#size-mm", "60")
+    page.locator("#btn-size").tap()
+    assert float(page.input_value("#size-mm")) == pytest.approx(60)
+
+
+def test_view_stays_in_viewport_when_tools_scroll(page):
+    open_sample(page, "two_cubes.stl", rows=2)
+    page.locator("#btn-export").scroll_into_view_if_needed()
+    box = page.evaluate("(()=>{const r=document.querySelector('#view canvas').getBoundingClientRect();return [r.top,r.bottom,innerHeight];})()")
+    assert box[0] >= 0 and box[1] <= box[2] and box[1] - box[0] > 100

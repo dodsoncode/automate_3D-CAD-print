@@ -7,8 +7,8 @@
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
-  body { font: 16px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1c2430; background: #f3f5f8; overflow-x: hidden; }
-  #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; max-width: 100vw; }
+  body { font: 16px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1c2430; background: #f3f5f8; overflow: hidden; }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; max-width: 100vw; }
   #view { flex: 0 0 45%; position: relative; background: #dfe8f2; touch-action: none; min-height: 120px; }
   #view canvas { display: block; width: 100%; height: 100%; }
   #view-note { position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: #4a5a6e; pointer-events: none; }
@@ -91,6 +91,7 @@
 
 <script src="../gui/vendor/three.min.js"></script>
 <script src="../gui/vendor/OrbitControls.js"></script>
+<script src="../gui/vendor/jszip.min.js"></script>
 <script src="js/mesh.js"></script>
 <script src="js/stl.js"></script>
 <script src="js/glb.js"></script>
@@ -109,7 +110,7 @@
   function msg(text, isErr) { var m = $('msg'); m.textContent = text || ''; m.className = isErr ? 'err' : ''; }
 
   // ---------- 3D view ----------
-  var renderer, scene, camera, controls, group, planeMesh, bedMesh, glOk = false, needsFit = true;
+  var cutActive = false, renderer, scene, camera, controls, group, planeMesh, bedMesh, glOk = false, needsFit = true;
   function initView() {
     var host = $('view');
     try {
@@ -185,7 +186,7 @@
   }
   function updatePlane() {
     if (!glOk) return;
-    var show = state.model.length > 0;
+    var show = state.model.length > 0 && cutActive;
     planeMesh.visible = show; if (!show) { render(); return; }
     var a = $('cut-axis').value, v = parseFloat($('cut-pos').value) || 0, b = M.bbox(state.model);
     var span = Math.max(b.size[0], b.size[1], b.size[2], 10) * 1.3, c = [0, 1, 2].map(function (k) { return (b.min[k] + b.max[k]) / 2; });
@@ -228,9 +229,13 @@
     var b = M.bbox(state.model), lo = Math.floor(b.min[a] * 10) / 10, hi = Math.ceil(b.max[a] * 10) / 10;
     r.min = lo; r.max = hi; r.value = (lo + hi) / 2; updateCutLabel();
   }
+  function refreshSize() {
+    if (!state.model.length) return;
+    var s = M.bbox(state.model).size; $('size-mm').value = fmt(Math.max(s[0], s[1], s[2]));
+  }
   function updateCutLabel() { $('cut-val').textContent = fmt(parseFloat($('cut-pos').value) || 0) + ' mm'; }
   function refresh() {
-    refreshList(); refreshChecks(); resetCutRange(); rebuildMeshes();
+    cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); rebuildMeshes();
     $('btn-undo').disabled = !undoStack.length;
   }
   function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
@@ -273,25 +278,29 @@
   }
   function exportStl() { return I3D.stl.write(state.model, 'model'); }
 
-  // the controller may need to adjust this one function to match the real artifact downloads API
+  // Artifact downloads: stl is not an allowed extension there, so save model.zip containing model.stl.
+  // Returns true (saved), 'declined' (viewer said no: no fallback) or false (anything else: use the plain download).
   async function saveViaClaude(bytes, filename) {
     try {
-      if (window.claude && window.claude.use) {
-        var d = await window.claude.use('downloads');
-        if (d) {
-          var blob = new Blob([bytes], { type: 'model/stl' });
-          await d.save(filename, blob);
-          return true;
-        }
-      }
-    } catch (e) { /* fall through to the plain download */ }
-    return false;
+      if (!(window.claude && window.claude.use)) return false;
+      var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 4000); });
+      var d = await Promise.race([window.claude.use('downloads'), timeout]);
+      if (!d) return false;
+      var zip = new JSZip(); zip.file(filename, bytes);
+      var data = await zip.generateAsync({ type: 'uint8array' });
+      await d.save({ filename: filename.replace(/\.stl$/, '.zip'), data: data });
+      return true;
+    } catch (e) {
+      return e && e.code === 'declined' ? 'declined' : false;
+    }
   }
   async function doExport() {
     if (!needModel()) return;
     var bytes = exportStl(), name = 'model.stl';
-    var closed = state.model.every(M.isClosed);
-    if (await saveViaClaude(bytes, name)) { msg('Saved ' + name + (closed ? '' : ' (note: mesh is not closed)')); return; }
+    var closed = state.model.every(M.isClosed), warn = closed ? '' : ' (note: mesh is not closed)';
+    var r = await saveViaClaude(bytes, name);
+    if (r === 'declined') { msg('Download cancelled'); return; }
+    if (r === true) { msg('Saved model.zip (contains model.stl)' + warn); return; }
     var url = URL.createObjectURL(new Blob([bytes], { type: 'model/stl' })), a = document.createElement('a');
     a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
@@ -326,6 +335,10 @@
     $('btn-rot-' + a).addEventListener('click', function () { if (needModel()) apply(function (m) { return M.layFlat(M.rotate90(m, a)); }, 'Rotated 90 degrees about ' + a.toUpperCase() + '.'); });
   });
   $('btn-flat').addEventListener('click', function () { if (needModel()) apply(M.layFlat, 'Seated on the bed.'); });
+  function cutTouched() { cutActive = true; updatePlane(); }
+  ['cut-axis', 'cut-pos', 'cut-keep'].forEach(function (id) {
+    ['focus', 'pointerdown', 'input', 'change'].forEach(function (ev) { $(id).addEventListener(ev, cutTouched); });
+  });
   $('cut-axis').addEventListener('change', function () { resetCutRange(); updatePlane(); });
   $('cut-pos').addEventListener('input', function () { updateCutLabel(); updatePlane(); });
   $('btn-cut').addEventListener('click', function () {
@@ -353,7 +366,7 @@
 
   initView();
   refresh();
-  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.exportStl = exportStl;
+  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
   App.ready = checkServer();
   window.I3DApp = App;
 })();

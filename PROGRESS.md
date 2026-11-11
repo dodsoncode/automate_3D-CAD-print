@@ -189,3 +189,4 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: desktop browser at phone size (Playwright); NOT on a real phone. The artifact downloads call (`saveViaClaude`) is a guess at the API and untested; the Blob fallback is what the tests exercise. Not yet published as an artifact (controller does that).
 - NEXT: Task 4 (wire Generate button, server.py, render.yaml); publish the artifact.
 - BLOCKED: nothing.
+- 2026-11-11 Image3D Task 3 round-1 fixes: export saves `model.zip` via the artifact downloads API (declined = "Download cancelled", else plain `model.stl` link), cut plane only shown while cutting, size field shows current size, page scroll locked so the 3D view stays put. Browser tests 14 pass (Playwright at phone size, fake `window.claude`); NOT on a real phone and not against the real artifact API.
