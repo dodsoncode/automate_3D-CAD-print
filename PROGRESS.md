@@ -159,3 +159,7 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `docs/superpowers/specs/2026-11-11-image3d-design.md` - design for a browser tool (`image3d/`): photo -> Hugging Face Space (Hunyuan3D / TRELLIS) -> edit (delete piece, size, orient, cut) -> STL. Web-checked: Meshy's API needs a paid plan; Hugging Face free accounts get a small daily GPU quota. Nothing built or tested yet.
 - NEXT: Jacob reviews the spec; then implementation plan and build (TI2-TI6).
 - BLOCKED: live Hugging Face generation cannot be tested from Claude's workspace (needs Jacob's token).
+
+### 2026-11-11 - Image3D step 2: spec revised for phone use
+- DONE: Jacob said the tool must work on a phone. Checked artifact rules: an artifact can host the editor and offer downloads but cannot call other sites. Spec now: one editor page delivered (a) as a claude.ai artifact (open GLB/OBJ/STL -> edit -> STL) and (b) from a small Render app that adds photo -> Hugging Face generation with the token kept server-side.
+- NEXT: Jacob reviews the spec (TI2).

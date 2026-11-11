@@ -98,5 +98,6 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] TI2 (J) Review the spec
 - [ ] TI3 (C) `mesh.js` + `stl.js` with Node tests (split, delete, scale, lay flat, cut, closed check)
 - [ ] TI4 (C) Editor page + loaders + single-file build, browser test
-- [ ] TI5 (C) Hugging Face generator (browser) + `generate.py` fallback
-- [ ] TI6 (J) Make a Hugging Face token; run one photo through; report result (first real verification of generation)
+- [ ] TI5 (C) `server.py` (FastAPI: serve page + `/api/generate` via Hugging Face) + `render.yaml`, tested with a fake generator; publish editor as artifact
+- [ ] TI6 (J) Try the artifact editor on the phone with a GLB from a Hugging Face Space page
+- [ ] TI7 (J) Hugging Face token + Render deploy; run one photo through (first real verification of generation)

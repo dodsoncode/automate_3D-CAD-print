@@ -15,25 +15,40 @@ Typical use: decorative shells and add-ons for the walking robot, not servo-fit 
 - Generator: free Hugging Face route (open-source Hunyuan3D / TRELLIS Spaces).
 - Python is fine, but the tool must **run in a browser** so he can open and edit from his devices.
 
+## Constraint added by Jacob (13:48)
+
+He will use this **on a phone, not a computer**. So: no local scripts, no local files to double-click,
+touch-sized controls, and everything reachable from a link.
+
 ## Assumptions (mine - correct me)
 
-- "Run in a browser" means the whole tool works as one web page with no server to keep running, so it opens
-  on a phone, tablet or computer. Python is kept only as an optional command-line fallback.
-- The Hugging Face token is pasted once into the page and stored in that browser only (localStorage).
-  It is never written to the repo.
 - "Solid model" means a closed (watertight) printable mesh. AI generators do not produce CAD solids
   (STEP / parametric); sizes are approximate until scaled in the editor.
+- A phone can save the exported STL and open it in Bambu Handy / send it on to Bambu Studio later.
 
-## Approaches considered
+## Hosting - what was checked
 
-1. **Browser-only page calling Hugging Face directly (chosen).** One HTML file; works on any device; no
-   install. Risk: a Space can be busy, change its API, or refuse browser calls.
-2. Local Python server + page. Token stays in a file, but only works on the computer running it.
-3. Hosted backend (Render etc.). Reachable anywhere but adds a service to run and secure. Not needed yet.
+- A claude.ai artifact page can be opened on the phone and can offer file downloads, but its security policy
+  **blocks network calls to other sites**, so an artifact cannot call Hugging Face itself.
+- Meshy's API needs a paid plan. Hugging Face Spaces are callable for free with a personal token and a small
+  daily GPU quota.
+- Jacob already deploys an app on Render (mental_stength), so a small Render web service is a known path.
 
-To contain the risk in (1), the editor never depends on generation: it also **opens any GLB / OBJ / STL
-file**, so a model made on the Hugging Face, Tripo or Meshy web apps (or by the Python fallback) can be
-edited and exported the same way.
+## Approach (chosen): one editor page, two ways to reach it
+
+1. **Editor as a claude.ai artifact - works on the phone today, no setup.** Open a model file (GLB / OBJ / STL),
+   edit, export STL. To get the model: run the photo through the Hunyuan3D or TRELLIS Space page in the phone
+   browser, download the GLB, open it in the editor. Two steps, both on the phone.
+2. **Same page served by a small Render app - one link does everything.** `image3d/server.py` (FastAPI) serves
+   the page and adds `POST /api/generate`, which forwards the photo to the Hugging Face Space with
+   `gradio_client` and returns the GLB. The Hugging Face token is a Render environment variable, never in the
+   page or the repo. A passcode (also an environment variable) guards `/api/generate` so strangers cannot spend
+   the quota. Render's free tier sleeps when idle, so the first tap can take about a minute.
+
+The page detects which mode it is in: the Generate button appears only when `/api/generate` answers.
+
+Rejected: browser calling Hugging Face directly with a pasted token (blocked inside artifacts; token would sit
+in the phone browser), and a local Python server (needs a computer).
 
 ## Components
 
@@ -42,10 +57,10 @@ edited and exported the same way.
 | `image3d/js/mesh.js` | Pure mesh maths: weld vertices, split into connected pieces, delete piece, scale / rotate / lay flat, plane cut with capped faces, closed-mesh check, bounding box, volume | nothing (runs in Node for tests) |
 | `image3d/js/stl.js` | Binary STL writer and reader | nothing |
 | `image3d/js/loaders.js` | GLB and OBJ -> plain triangle arrays | vendored three.js GLTFLoader |
-| `image3d/js/generators.js` | `generate(imageFile, settings) -> GLB bytes`. One entry per generator; first one is Hugging Face Spaces through the Gradio JS client. Space name and endpoint are settings, not hard-coded logic | `@gradio/client` (loaded only when Generate is pressed) |
-| `image3d/index.html` | The page: photo import, Generate, 3D view, piece list, edit tools, checks, Export STL | the units above, `gui/vendor/three.min.js` |
-| `image3d/generate.py` | Optional fallback: `python image3d/generate.py photo.jpg out.glb` using `gradio_client`; token from `HF_TOKEN` env var | `pip install gradio_client` |
-| `image3d/build.py` | Inlines everything into `image3d/image3d.html` (single file, same idea as `gui/build_artifact.py`) | - |
+| `image3d/server.py` | FastAPI app: serves the built page; `GET /api/health`; `POST /api/generate` (photo + passcode -> GLB). Generators sit behind one function, `generate(image_bytes) -> glb_bytes`; first is Hugging Face Spaces, with Space name and endpoint read from environment variables | `fastapi`, `uvicorn`, `gradio_client`, `python-multipart` |
+| `render.yaml` + `image3d/requirements.txt` | Render blueprint for the service | - |
+| `image3d/index.html` | The page, laid out for a phone: photo import, Generate (Render mode only), open model file, 3D view, piece list, edit tools, checks, Export STL | the units above, `gui/vendor/three.min.js` |
+| `image3d/build.py` | Inlines everything into `image3d/image3d.html` (single file, same idea as `gui/build_artifact.py`); this file is both the artifact and what the Render app serves | - |
 
 ## Editing features (version 1)
 
@@ -61,12 +76,12 @@ Not in version 1: sculpting, holes / booleans, merging parts, colors or multi-ma
 
 ## Data flow
 
-photo -> `generators.js` -> GLB bytes -> `loaders.js` -> triangles -> `mesh.js` weld + split into pieces ->
+photo -> `server.py` -> Hugging Face Space -> GLB bytes (or: GLB file opened by hand) -> `loaders.js` -> triangles -> `mesh.js` weld + split into pieces ->
 user edits (each edit = pure function on the piece list) -> `stl.js` -> download.
 
 ## Errors
 
-- No token / bad token / quota used up / Space busy: plain message with what to do next
+- Wrong passcode / quota used up / Space busy or asleep: plain message with what to do next
   ("try again in a few minutes", "open a model file instead").
 - Unreadable model file: message, state unchanged.
 - Cut that removes everything: refused with a message.
@@ -77,10 +92,16 @@ user edits (each edit = pure function on the piece list) -> `stl.js` -> download
   a cube and a two-piece sample closed with the right volume; STL round trip.
 - Browser test (Playwright, if available here): page loads without errors, opens a sample STL, deletes a
   piece, exports an STL that `mesh.js` reads back closed.
-- **Cannot be verified from Claude's workspace:** the live Hugging Face call (needs Jacob's token and network
+- `server.py`: tested with a fake generator (passcode refused / accepted, GLB returned).
+- **Cannot be verified from Claude's workspace:** phone behaviour (only a phone-sized desktop browser test), the Render deploy, and the live Hugging Face call (needs Jacob's token and network
   access). It will be marked NOT verified until Jacob runs one photo through it.
 
 ## Jacob's setup steps (after merge)
 
+Today, no setup: open the artifact link on the phone; make a model on the Hugging Face Space page; open the
+GLB in the editor.
+
+For one-link generation (about 15 minutes, can be done from the phone):
 1. Create a free Hugging Face account and a read token.
-2. Open `image3d/image3d.html`, paste the token in Settings, pick a photo, press Generate.
+2. In Render: New > Blueprint > this repo; set `HF_TOKEN` and `IMAGE3D_PASSCODE`.
+3. Open the Render URL on the phone, enter the passcode once, pick a photo, press Generate.
