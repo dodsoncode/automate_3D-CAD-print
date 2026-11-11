@@ -19,3 +19,5 @@ services:
         value: /shape_generation
       - key: HF_IMAGE_PARAM
         value: image
+      - key: HF_EXTRA_JSON
+        value: '{"octree_resolution": 128}'

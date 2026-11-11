@@ -9,8 +9,9 @@ Times are US Central on 2026-11-11. Commits are on branch `image3d-tool`.
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
 - **Waiting on Jacob:** TI6 (try the editor on the phone) and TI7 (Hugging Face token + Render deploy).
-- **Not verified by anyone yet:** a real phone, the live Hugging Face call, the Render deploy, and the zip
-  download inside the real Claude app.
+- **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
+- **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
+  Claude app.
 
 ## What Jacob asked for
 
@@ -111,6 +112,17 @@ second **free Render** service next to the mental fitness app.
 - Full run before pushing: `image3d/tests` + `gui/tests` 106 passed; `firmware` 39 passed.
 - The artifact was republished with the final page (wake lock, model size line, undo limit).
 - PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL". Not merged; waits for Jacob.
+
+### Step 15 - First live generation and two fixes (16:50-18:00)
+- Jacob supplied a Hugging Face token. One real run of the generation call against the default Space worked
+  (valid model in about 10 seconds). This was run from Claude's workspace, not through Render.
+- Problem 1: the model had about 917,000 triangles. Fix: the server now asks the Space for a lighter model
+  (`HF_EXTRA_JSON`, default `{"octree_resolution": 128}`, about 115,000 triangles; measured live).
+- Problem 2: cutting the real model left it open. Cause: the hand-written cap triangulation failed on the real
+  cross-section (an outline with a cavity inside). Fix: caps now use the earcut library (vendored), and the
+  failing cross-section is kept as a test fixture.
+- Checked on real models: 168 cuts along all three axes, all closed; the page opened and cut a real model at
+  phone size. Not yet checked: Render and a real phone.
 
 ## What Jacob does next
 

@@ -217,3 +217,11 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: full run 106 passed (image3d + gui) and 39 passed (firmware); artifact republished from the final page; branch `image3d-tool` pushed; PR #7 opened to `main` (not merged).
 - NEXT: Jacob - TI6 (try the artifact editor on the phone), TI7 (Hugging Face token + Render Blueprint, first real generation), then say when to merge. Render's Blueprint reads `render.yaml` from the branch it is pointed at, so either merge first or pick branch `image3d-tool`.
 - BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy, zip download inside the Claude app.
+
+### 2026-11-11 - Image3D: first live generation, two fixes from it
+- DONE (live check): with Jacob's Hugging Face token, ran `server.generate_glb` against the real `tencent/Hunyuan3D-2` Space from Claude's workspace: valid GLB in about 10 s. This is the first real verification of the generation call (not through Render).
+- FOUND 1: the default model was about 917,000 triangles (13.8 MB), too heavy for a phone. FIX: new setting `HF_EXTRA_JSON` (default `{"octree_resolution": 128}` for the default Space) -> about 115,000 triangles (3.2 MB); 96 gives about 55,000. Measured live.
+- FOUND 2: cutting the real model left it not closed. Root cause: the hand-written cap triangulation (hole bridging + ear clipping) produced a wrong cap for the real cross-section (1496-point outline with a 1105-point cavity); small synthetic tests had not shown it. FIX: caps are now triangulated with earcut (vendored, `image3d/vendor/earcut.min.js`, ISC licence), with a stitch step so points on straight runs still join the walls. The failing cross-section is kept as `image3d/tests/fixtures/real_section.json` with a regression test; a bow-tie (pinch) cross-section test was added too.
+- Checked: 114 cuts across x/y/z on the 917k model and 54 on the 113k model: all closed, volume conserved to 5e-12. Page opened the real model at phone size in 0.9 s and cut it watertight. `image3d/tests` + `gui/tests`: 113 passed.
+- Verification level: script-checked and desktop-tested with REAL generated models. Still NOT verified: Render deploy, a real phone.
+- NEXT: Jacob - deploy on Render (TI7) and try on the phone (TI6). Jacob's token appeared in the chat; suggest replacing it after setup.

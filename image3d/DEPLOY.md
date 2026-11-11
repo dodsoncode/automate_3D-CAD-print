@@ -1,6 +1,6 @@
 # Deploy Image3D on Render (from a phone)
 
-Status: the server code is tested only with a FAKE generator. The live Hugging Face call and the Render deploy are NOT verified yet; the first real run is TI7.
+Status: the Hugging Face call was run for real on 2026-11-11 from Claude's workspace (default Space, a test picture, about 10 seconds, model opened and cut cleanly in the editor). The Render deploy itself and a real phone are NOT verified yet; that is TI7.
 
 ## A. Hugging Face account and token
 1. Open huggingface.co in your phone browser and tap Sign Up. Create a free account and confirm your email.
@@ -30,4 +30,6 @@ Status: the server code is tested only with a FAKE generator. The live Hugging F
   - `HF_SPACE`: the Space name, for example `owner/space-name`.
   - `HF_API_NAME`: the endpoint name from the Space page ("Use via API"), for example `/shape_generation`. Setting it to an empty value makes the server guess an endpoint, which is a fallback and is not reliable.
   - `HF_IMAGE_PARAM`: the name of the endpoint's photo input (default `image`).
-  A different Space may need code changes if its inputs or outputs differ. The live call is NOT verified, for this or any other Space.
+  - `HF_EXTRA_JSON`: extra settings for the call, as a JSON object. For another Space set it to `{}` unless you know its settings.
+  A different Space may need code changes if its inputs or outputs differ. Only the default Space has been run for real.
+- Model too heavy or too coarse: detail is set by `HF_EXTRA_JSON` in Render (Environment). The default `{"octree_resolution": 128}` gives about 115,000 triangles. `96` gives about 55,000 (faster on the phone, less detail); `256` gives about 900,000 (too heavy for a phone).

@@ -11,10 +11,11 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 
 | Path | What it is |
 | --- | --- |
-| `index.html` | The editor page (needs `js/` and `../gui/vendor/`) |
+| `index.html` | The editor page (needs `js/`, `vendor/` and `../gui/vendor/`) |
 | `image3d.html` | Single-file build of the page (committed); works from any directory and as an artifact |
 | `build.py` | `python image3d/build.py` bundles `index.html` into `image3d.html` |
 | `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, closed check) and STL read/write |
+| `vendor/earcut.min.js` | Polygon triangulation for cut caps (earcut 2.2.4, ISC; see `vendor/LICENSES.txt`) |
 | `js/glb.js`, `js/obj.js`, `js/readany.js` | File readers (GLB, OBJ; `readany.js` picks by extension, STL goes through `stl.js`) |
 | `server.py` | FastAPI app for Render: serves the page, `GET /api/health`, `POST /api/generate` via a Hugging Face Space |
 | `requirements.txt` | Python dependencies for the server |
@@ -31,6 +32,6 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 
 - Mesh maths and file readers: script-checked (Node under pytest, on generated samples). Not tried on a real Hunyuan3D/TRELLIS GLB.
 - Editor page: tested in a desktop browser at phone size (Playwright), NOT on a real phone.
-- Server: tested with a FAKE generator and a fake `gradio_client`.
-- NOT verified: the live Hugging Face call, the Render deploy, and the artifact's `model.zip` download inside the real Claude app.
+- Server: tested with a FAKE generator and a fake `gradio_client`; the real Hugging Face call was run once from Claude's workspace on 2026-11-11 (default Space) and the resulting model opened and cut cleanly.
+- NOT verified: the Render deploy, a real phone, and the artifact's `model.zip` download inside the real Claude app.
 - Open for Jacob: TI6 (try the artifact editor on the phone) and TI7 (Hugging Face token + Render deploy, first real generation). See `../TASKS.md`.
