@@ -107,15 +107,10 @@ second **free Render** service next to the mental fitness app.
   `gradio_client`; NOT on a real phone, not against the live Space or Render. The 32-bit index choice is covered
   by reading only (no browser test).
 
-### Step 13 - PR
-- The PR to `main` is opened by the controller and is not merged until Jacob says so.
-
-### Known limits (can wait)
-- Cap triangulation is quadratic on extreme cross-sections.
-- Quantized, mirrored or strip GLBs are not supported.
-- Selecting a piece redraws everything, which is slow on huge models.
-- The server keeps temporary GLBs until it restarts.
-- If the phone still drops long requests, the next step is submit-then-poll.
+### Step 13 - PR (15:55)
+- Full run before pushing: `image3d/tests` + `gui/tests` 106 passed; `firmware` 39 passed.
+- The artifact was republished with the final page (wake lock, model size line, undo limit).
+- PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL". Not merged; waits for Jacob.
 
 ## What Jacob does next
 

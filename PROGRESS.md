@@ -212,3 +212,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Verification: desktop browser at phone size with a STUBBED wake lock, fake generator and fake `gradio_client`; NOT on a real phone, not the live Space or Render. The 32-bit index change is covered by reading only.
 - NEXT: controller opens the PR to `main`; not merged until Jacob says so.
 - BLOCKED: nothing.
+
+### 2026-11-11 - Image3D: PR opened
+- DONE: full run 106 passed (image3d + gui) and 39 passed (firmware); artifact republished from the final page; branch `image3d-tool` pushed; PR #7 opened to `main` (not merged).
+- NEXT: Jacob - TI6 (try the artifact editor on the phone), TI7 (Hugging Face token + Render Blueprint, first real generation), then say when to merge. Render's Blueprint reads `render.yaml` from the branch it is pointed at, so either merge first or pick branch `image3d-tool`.
+- BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy, zip download inside the Claude app.
