@@ -110,7 +110,10 @@ second **free Render** service next to the mental fitness app.
 ### Step 13 - PR (15:55)
 - Full run before pushing: `image3d/tests` + `gui/tests` 106 passed; `firmware` 39 passed.
 - The artifact was republished with the final page (wake lock, model size line, undo limit).
-- PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL". Not merged; waits for Jacob.
+- PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL".
+
+### Step 14 - Merge (16:42)
+- Jacob asked for the merge; PR #7 merged to `main` (2bc9d21). The Render Blueprint can now use branch `main`.
 
 ## What Jacob does next
 
@@ -118,8 +121,7 @@ second **free Render** service next to the mental fitness app.
    Hunyuan3D Space page in the phone browser, download the GLB, open it in the editor, delete a piece, set the
    size, export. Report anything that does not work.
 2. **TI7 - one-link generation (about 15 minutes):** follow [`DEPLOY.md`](DEPLOY.md): free Hugging Face token,
-   then Render > New > Blueprint > this repo, set `HF_TOKEN` and `IMAGE3D_PASSCODE`. This needs the PR merged
-   to `main` first (or point the Blueprint at branch `image3d-tool`).
+   then Render > New > Blueprint > this repo, set `HF_TOKEN` and `IMAGE3D_PASSCODE`. The PR is merged, so use branch `main`.
 3. Report the first real photo-to-model result. That is the first true test of generation.
 
 ## How to run the tests

@@ -217,3 +217,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: full run 106 passed (image3d + gui) and 39 passed (firmware); artifact republished from the final page; branch `image3d-tool` pushed; PR #7 opened to `main` (not merged).
 - NEXT: Jacob - TI6 (try the artifact editor on the phone), TI7 (Hugging Face token + Render Blueprint, first real generation), then say when to merge. Render's Blueprint reads `render.yaml` from the branch it is pointed at, so either merge first or pick branch `image3d-tool`.
 - BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy, zip download inside the Claude app.
+
+### 2026-11-11 - Image3D: PR #7 merged
+- DONE: Jacob asked for the merge; PR #7 merged to `main` (2bc9d21). `render.yaml` and `image3d/` are now on `main`, so the Render Blueprint can use branch `main`.
+- NEXT: Jacob - TI7 (Hugging Face token + Render Blueprint per `image3d/DEPLOY.md`, first real generation) and TI6 (try the artifact editor on the phone).
+- BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy.
