@@ -225,9 +225,70 @@ def test_throttle_old_failures_expire_and_ips_are_separate(client, monkeypatch):
     assert post(client, passcode="nope").status_code == 401  # the 4 old ones no longer count
     assert post(client).status_code == 200
     for _ in range(5):
-        client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "1.2.3.4, 10.0.0.1"})
+        client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "1.2.3.4"})
     assert client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "1.2.3.4"}).status_code == 429
     assert post(client).status_code == 200  # another client (the socket peer) is not locked
+
+
+def test_throttle_key_is_the_last_forwarded_entry(client):
+    # the first entries are client-controlled; rotating them must not dodge the limit
+    for i in range(5):
+        r = client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": "6.6.6.%d, 9.9.9.9" % i})
+        assert r.status_code == 401
+    r = client.post("/api/generate", headers={"X-Passcode": "sesame", "X-Forwarded-For": "7.7.7.7, 9.9.9.9"})
+    assert r.status_code == 429
+    r = client.post("/api/generate", headers={"X-Passcode": "sesame", "X-Forwarded-For": "7.7.7.7, 8.8.8.8"})
+    assert r.status_code != 429  # a different last entry is a different client
+
+
+def wrong_from(client, key):
+    return client.post("/api/generate", headers={"X-Passcode": "nope", "X-Forwarded-For": key})
+
+
+def test_global_backstop_trips_and_clears(client, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    for i in range(31):
+        assert wrong_from(client, "10.0.0.%d" % i).status_code == 401
+    r = post(client)  # correct passcode, but too many wrong attempts overall
+    assert r.status_code == 429 and r.json()["detail"] == "too many attempts, try again later"
+    assert wrong_from(client, "10.9.9.9").status_code == 429
+    clock.t += 599
+    assert post(client).status_code == 429
+    clock.t += 2
+    assert post(client).status_code == 200
+
+
+def test_global_count_is_not_reset_by_a_correct_passcode(client, monkeypatch):
+    monkeypatch.setattr(server, "CLOCK", Clock())
+    for i in range(31):
+        wrong_from(client, "10.0.1.%d" % i)
+        if i % 5 == 0:
+            client.post("/api/generate", headers={"X-Passcode": "sesame", "X-Forwarded-For": "5.5.5.5"})
+    assert post(client).status_code == 429
+
+
+def test_throttle_table_is_bounded(monkeypatch):
+    monkeypatch.setattr(server, "CLOCK", Clock())
+    monkeypatch.setattr(server, "MAX_GLOBAL_FAILS", 10**6)  # keep the global backstop out of the way
+    for i in range(1500):
+        server._wrong("k%d" % i)
+    assert len(server._fails) <= 1000 and len(server._locked) <= 1000
+    assert "k1499" in server._fails and "k0" not in server._fails
+    for i in range(1500):
+        server._wrong("L%d" % (i % 3))  # three keys hammered: they lock, table stays small
+    assert len(server._fails) <= 1000
+
+
+def test_expired_entries_are_swept(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    monkeypatch.setattr(server, "MAX_GLOBAL_FAILS", 10**6)
+    for i in range(50):
+        server._wrong("old%d" % i)
+    clock.t += 601
+    server._wrong("fresh")
+    assert list(server._fails) == ["fresh"]
 
 
 # ---------- body limits are enforced before the body is read ----------

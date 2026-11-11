@@ -24,41 +24,65 @@ TIMEOUT_S = 300
 BODY_LIMIT = MAX_BYTES + 64 * 1024  # multipart overhead allowance
 MAX_DETAIL = 300
 MAX_FAILS, FAIL_WINDOW_S, LOCK_S = 5, 600, 600
+MAX_GLOBAL_FAILS = 30  # wrong passcodes from all clients together within the window
+MAX_KEYS = 1000
 
 app = FastAPI(title="Image3D", docs_url=None, redoc_url=None, openapi_url=None)
 
-# ---------- wrong-passcode throttle (in memory, per client address) ----------
+# ---------- wrong-passcode throttle (in memory) ----------
 CLOCK = time.monotonic  # tests replace this
-_fails = {}   # ip -> timestamps of recent wrong passcodes
-_locked = {}  # ip -> time the lock ends
+_fails = {}    # client key -> timestamps of recent wrong passcodes (oldest key first)
+_locked = {}   # client key -> time the lock ends
+_global = []   # timestamps of recent wrong passcodes from everyone
 
 
 def reset_throttle():
     _fails.clear()
     _locked.clear()
+    del _global[:]
 
 
-def _is_locked(ip):
-    until = _locked.get(ip)
+def _global_locked():
+    now = CLOCK()
+    _global[:] = [t for t in _global if now - t < FAIL_WINDOW_S]
+    return len(_global) > MAX_GLOBAL_FAILS
+
+
+def _is_locked(key):
+    until = _locked.get(key)
     if until is None:
         return False
     if CLOCK() < until:
         return True
-    del _locked[ip]
-    _fails.pop(ip, None)
+    del _locked[key]
+    _fails.pop(key, None)
     return False
 
 
-def _wrong(ip):
+def _sweep(now):
+    for k in [k for k, ts in _fails.items() if now - ts[-1] >= FAIL_WINDOW_S and _locked.get(k, 0) <= now]:
+        del _fails[k]
+    for k in [k for k, until in _locked.items() if until <= now]:
+        del _locked[k]
+    for table in (_fails, _locked):
+        while len(table) > MAX_KEYS:
+            del table[next(iter(table))]  # drop the oldest
+
+
+def _wrong(key):
     now = CLOCK()
-    recent = [t for t in _fails.get(ip, []) if now - t < FAIL_WINDOW_S] + [now]
-    _fails[ip] = recent
+    _global.append(now)
+    recent = [t for t in _fails.pop(key, []) if now - t < FAIL_WINDOW_S] + [now]
+    _fails[key] = recent  # re-inserted, so the table stays ordered by last attempt
     if len(recent) >= MAX_FAILS:
-        _locked[ip] = now + LOCK_S
+        _locked.pop(key, None)
+        _locked[key] = now + LOCK_S
+    _sweep(now)
 
 
-def _client_ip(scope, headers):
-    fwd = headers.get(b"x-forwarded-for", b"").decode("latin-1").split(",")[0].strip()
+def _client_key(scope, headers):
+    """The LAST X-Forwarded-For entry is the one Render's proxy appended; earlier ones are client-controlled."""
+    fwd = headers.get(b"x-forwarded-for", b"").decode("latin-1").split(",")[-1].strip()
     return fwd or (scope.get("client") or ("?",))[0]
 
 
@@ -80,8 +104,8 @@ class GenerateGuard:
         passcode, token = os.environ.get("IMAGE3D_PASSCODE"), os.environ.get("HF_TOKEN")
         if not passcode or not token:
             return await reply(500, "server not configured")
-        ip = _client_ip(scope, headers)
-        if _is_locked(ip):
+        ip = _client_key(scope, headers)
+        if _global_locked() or _is_locked(ip):
             return await reply(429, "too many attempts, try again later")
         given = headers.get(b"x-passcode", b"")
         if not hmac.compare_digest(given, passcode.encode("utf-8")):

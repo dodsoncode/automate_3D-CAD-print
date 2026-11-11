@@ -13,7 +13,7 @@ Status: the server code is tested only with a FAKE generator. The live Hugging F
 2. Tap New, then Blueprint.
 3. Connect GitHub if asked, then pick the repo `dodsoncode/automate_3D-CAD-print`.
 4. Choose the branch `main` (the Blueprint file `render.yaml` is at the repo root). Tap Continue.
-5. Render asks for two secret values. Set `HF_TOKEN` to the token from part A, and `IMAGE3D_PASSCODE` to a passcode you invent (anything private, you will type it on the page).
+5. Render asks for two secret values. Set `HF_TOKEN` to the token from part A, and `IMAGE3D_PASSCODE` to a long passcode you invent, for example four random words. It is the only lock on your Hugging Face quota, so do not use a short or guessable one (you will type it on the page).
 6. Tap Apply / Deploy and wait for the deploy to say Live.
 
 ## C. Use it
@@ -25,7 +25,7 @@ Status: the server code is tested only with a FAKE generator. The live Hugging F
 - First load takes about a minute: the free Render instance sleeps when idle and has to wake up. Reload after a minute.
 - Message mentions quota: the daily free GPU time on Hugging Face is used up. Try again later (it resets daily).
 - Message says wrong passcode: the passcode must match `IMAGE3D_PASSCODE` in Render exactly. Message says server not configured: `HF_TOKEN` or `IMAGE3D_PASSCODE` is missing in Render (Environment tab).
-- Too many attempts: after 5 wrong passcodes the server refuses that phone for 10 minutes. Wait, then type the right passcode.
+- Message says too many attempts: wait 10 minutes and try again. After 5 wrong passcodes the server refuses that phone for 10 minutes, and if many wrong passcodes arrive from anywhere it refuses everyone for a while.
 - Space asleep, busy or errors: wait and retry, or switch Space. The default is `tencent/Hunyuan3D-2` with the endpoint `/shape_generation`, which makes the shape only (no texture). That suits printing. To switch, open the service in Render, Environment, and set the three values together, then save (Render redeploys):
   - `HF_SPACE`: the Space name, for example `owner/space-name`.
   - `HF_API_NAME`: the endpoint name from the Space page ("Use via API"), for example `/shape_generation`. Setting it to an empty value makes the server guess an endpoint, which is a fallback and is not reliable.
