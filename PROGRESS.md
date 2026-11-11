@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor) is built and desktop-tested; the editor is published as a claude.ai artifact. Waiting on Jacob for TI6 (try the artifact editor on the phone) and TI7 (Hugging Face token + Render deploy, first real test of generation)
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -154,3 +154,66 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 ### 2026-10-21 - Step: merge PRs #6 and #5
 - DONE: PR #6 (hexapod + windmill rover styles) merged to `main` at Jacob's request. PR #5 (log of PR #4) had conflicts in PROGRESS.md; resolved by keeping both sets of entries, then merged.
 - NEXT: Jacob's items TS6, TK6-TK9, T1.1 in TASKS.md.
+
+### 2026-11-11 - Image3D step 1: design spec
+- DONE: `docs/superpowers/specs/2026-11-11-image3d-design.md` - design for a browser tool (`image3d/`): photo -> Hugging Face Space (Hunyuan3D / TRELLIS) -> edit (delete piece, size, orient, cut) -> STL. Web-checked: Meshy's API needs a paid plan; Hugging Face free accounts get a small daily GPU quota. Nothing built or tested yet.
+- NEXT: Jacob reviews the spec; then implementation plan and build (TI2-TI6).
+- BLOCKED: live Hugging Face generation cannot be tested from Claude's workspace (needs Jacob's token).
+
+### 2026-11-11 - Image3D step 2: spec revised for phone use
+- DONE: Jacob said the tool must work on a phone. Checked artifact rules: an artifact can host the editor and offer downloads but cannot call other sites. Spec now: one editor page delivered (a) as a claude.ai artifact (open GLB/OBJ/STL -> edit -> STL) and (b) from a small Render app that adds photo -> Hugging Face generation with the token kept server-side.
+- NEXT: Jacob reviews the spec (TI2).
+
+### 2026-11-11 - Image3D step 3: spec approved, implementation plan
+- DONE: Jacob approved the spec (TI2) and confirmed Render free instance alongside mental_stength. Plan written: `docs/superpowers/plans/2026-11-11-image3d.md` (5 tasks: mesh maths, file readers, editor page + artifact, Render service, docs + PR).
+- NEXT: Jacob glances at the plan and picks how to run it; then Task 1.
+
+### 2026-11-11 - Image3D Task 1: mesh.js + stl.js (TI3)
+- DONE: `image3d/js/mesh.js` (weld, split, bbox, volume, isClosed, scale, scaleToLongest, rotate90, layFlat, removePiece, keepLargest, dropSmall, cut) and `image3d/js/stl.js` (binary write, binary/ASCII read). Dependency-free UMD (`I3D.mesh`, `I3D.stl`). `cut` clips each shell, shares one vertex per cut edge with the cap, and ear-clips the cap with nested loops as holes; a cut that leaves a shell in separate pieces returns them as separate shells.
+- Review fixes: cap ear-clipping now uses a distance tolerance (fine cap loops of thousands of vertices used to come out open), and `weld` accepts Float32Array/Float64Array soups.
+- Tests: `image3d/tests/test_mesh.py` - 18 pass (~4 s) (Node snippets from pytest). Includes a skewed off-centre tube cut on all three axes (closed + volume conserved), which caught a T-junction bug in cap triangulation during development.
+- Verification: script-checked only (Node under pytest). Not tried on a real generated mesh, in a browser or on a phone.
+- NEXT: Task 2 (file readers: GLB/OBJ/STL into shells).
+- BLOCKED: nothing.
+
+### 2026-11-11 - Image3D Task 2: file readers (glb.js, obj.js, readany.js)
+- DONE: `image3d/js/glb.js` (`I3D.glb.read`: GLB container, embedded BIN, float POSITION incl. strided, indices of any integer type or none, triangle mode only, node hierarchy with matrix or TRS, several meshes, glTF Y-up -> Z-up; throws `compressed` for Draco/meshopt and `not a GLB file` on bad magic), `image3d/js/obj.js` (`I3D.obj.read`: v/f, `v/vt/vn` forms, negative indices, fan triangulation) and `image3d/js/readany.js` (`I3D.readAny(name, bytes)` by case-insensitive extension; `module.exports = readAny` in Node; throws `unsupported file`). `image3d/tests/make_samples.py` (standard library only) writes the committed samples in `image3d/tests/samples/` (`two_cubes.glb/.obj/.stl`, `scaled.glb`, `box_yup.glb`).
+- Tests: `image3d/tests/test_readers.py` - 8 pass; whole `image3d/tests` suite 26 pass (~4 s).
+- Verification: script-checked only (Node under pytest, on generated samples). Not tried on a real Hunyuan3D/TRELLIS GLB, in a browser or on a phone.
+- NEXT: Task 3 (editor page + artifact).
+- BLOCKED: nothing.
+
+### 2026-11-11 - Image3D Task 3: editor page, single-file build, browser tests (TI4)
+- DONE: `image3d/index.html` (phone layout: 3D view on top ~45%, tools below; open GLB/OBJ/STL, piece list, tap-to-select in list or view, delete / keep largest / remove tiny bits, size, rotate, lay flat, cut with live plane preview, undo (20), closed / bed / piece-count checks, STL export via `claude.use('downloads')` then Blob link fallback, hidden `#gen-panel`, "How to get a model" note), `image3d/build.py` -> `image3d/image3d.html` (one self-contained file, committed), `image3d/README.md`, new sample `unit_box.glb`.
+- Tests: `image3d/tests/test_page.py` - 8 pass (Playwright, 390 x 844, touch); whole `image3d/tests` suite 34 pass.
+- Verification: desktop browser at phone size (Playwright); NOT on a real phone. The artifact downloads call (`saveViaClaude`) is a guess at the API and untested; the Blob fallback is what the tests exercise. Not yet published as an artifact (controller does that).
+- NEXT: Task 4 (wire Generate button, server.py, render.yaml); publish the artifact.
+- BLOCKED: nothing.
+- 2026-11-11 Image3D Task 3 round-1 fixes: export saves `model.zip` via the artifact downloads API (declined = "Download cancelled", else plain `model.stl` link), cut plane only shown while cutting, size field shows current size, page scroll locked so the 3D view stays put. Browser tests 14 pass (Playwright at phone size, fake `window.claude`); NOT on a real phone and not against the real artifact API.
+
+### 2026-11-11 - Image3D Task 4: Render service (TI5)
+- DONE: `image3d/server.py` (FastAPI: `GET /` serves `image3d.html`, `GET /api/health`, `POST /api/generate` with check order 500 not configured, 401 passcode (constant-time), 400 not an image, 413 over 10 MB, 503 generator failure with the Space's reason; `generate_glb` via `gradio_client`, imported lazily, `token=` with `hf_token=` fallback; `GENERATOR` is swappable), `image3d/requirements.txt`, root `render.yaml` (free Python web service, `rootDir: image3d`, health check `/api/health`, `HF_TOKEN` / `IMAGE3D_PASSCODE` secrets), `image3d/DEPLOY.md` (phone steps + troubleshooting). Page: Generate button posts the photo, shows progress text and disables itself while running, shows the server's `detail` in the message line on errors, opens the result with `openBytes('generated.glb', ...)`; `image3d.html` rebuilt.
+- Tests: `image3d/tests/test_server.py` (14, includes a fake `gradio_client`) and two new browser tests (uvicorn + fake generator); whole `image3d/tests` suite 56 pass.
+- Verification: desktop-tested with a FAKE generator; live Hugging Face call and Render deploy NOT verified (endpoint auto-pick and result parsing are guesses about the Space's API until TI7).
+- NEXT: controller publishes the editor as an artifact (the part of TI5 not done here); then TI6 / TI7 (Jacob).
+- BLOCKED: nothing.
+- 2026-11-11 Image3D Task 4 round-1 fixes: upload limit and passcode now enforced by an ASGI guard before the multipart body is read (500, then 401, then 413 on Content-Length or streamed bytes, also chunked); Hugging Face call now `submit(api_name='/shape_generation', image=handle_file(...))` against default Space `tencent/Hunyuan3D-2` (env `HF_SPACE`, `HF_API_NAME`, `HF_IMAGE_PARAM`; empty `HF_API_NAME` = auto-pick fallback); page downsizes the photo to a 1024 px JPEG before upload; docs/openapi disabled, error detail capped at 300 chars, 5-wrong-passcode throttle (429 for 10 min per IP). Tests: server + page 45 pass, FAKE generator and fake `gradio_client` only; live Hugging Face call and Render deploy still NOT verified.
+- 2026-11-11 Image3D Task 4 round-2 fix: throttle key is now the LAST X-Forwarded-For entry (the one Render's proxy adds), a global backstop (more than 30 wrong passcodes from all clients in 10 minutes -> 429 for everyone, not reset by a correct passcode), and the per-key tables are swept and capped at 1000 keys. `DEPLOY.md` asks for a long passcode and explains "too many attempts". Tests: `test_server.py` 32 pass (injectable clock); NOT tried behind the real Render proxy.
+
+### 2026-11-11 - Image3D Task 5: docs and full test run
+- DONE: `image3d/README.md` updated (two ways to use it, files table, tests, verification status); root `README.md` Layout lists `image3d/`; "Current status" above mentions image3d. Full run `python -m pytest -q image3d/tests gui/tests && (cd firmware && python -m pytest -q)`: 101 passed (image3d + gui), 39 passed (firmware); nothing existing broken.
+- Verification: mesh maths and readers script-checked; page tested in a desktop browser at phone size (Playwright), NOT on a real phone; server tested with a FAKE generator. NOT verified: the live Hugging Face call, the Render deploy, and the artifact's `model.zip` download inside the real Claude app.
+- NEXT: Jacob does TI6 (try the artifact editor on the phone with a GLB from a Hugging Face Space page) and TI7 (Hugging Face token + Render deploy, one photo through). Controller pushes the branch and opens the PR to `main` (not merged).
+- BLOCKED: nothing.
+
+### 2026-11-11 - Image3D final fix wave (whole-branch review)
+- DONE: keep the screen awake while generating (wake lock, re-requested on return, released in the end) with status "Generating... keep this screen open (about a minute or two)"; any `TypeError` from `fetch` shows the friendly "server may be waking up" message; `requirements.txt` pinned to installed majors; timed-out Space job is cancelled before the 503; 32-bit mesh indices chosen by vertex count (> 65535); Size section shows the whole model's X x Y x Z (`#model-size`); undo limit 20 up to 100,000 triangles, 5 above (`I3DApp.undoLimit()`); `DEPLOY.md` repo name `dodsoncode/automate_3d-cad-print`; `image3d/PROGRESS.md` Step 12 rewritten, Step 13 and known limits added; `image3d.html` rebuilt.
+- Tests: `python -m pytest -q image3d/tests` 81 pass (5 new tests).
+- Verification: desktop browser at phone size with a STUBBED wake lock, fake generator and fake `gradio_client`; NOT on a real phone, not the live Space or Render. The 32-bit index change is covered by reading only.
+- NEXT: controller opens the PR to `main`; not merged until Jacob says so.
+- BLOCKED: nothing.
+
+### 2026-11-11 - Image3D: PR opened
+- DONE: full run 106 passed (image3d + gui) and 39 passed (firmware); artifact republished from the final page; branch `image3d-tool` pushed; PR #7 opened to `main` (not merged).
+- NEXT: Jacob - TI6 (try the artifact editor on the phone), TI7 (Hugging Face token + Render Blueprint, first real generation), then say when to merge. Render's Blueprint reads `render.yaml` from the branch it is pointed at, so either merge first or pick branch `image3d-tool`.
+- BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy, zip download inside the Claude app.

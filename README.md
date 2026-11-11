@@ -14,6 +14,7 @@ Goal project: a simple multi-piece 3D-printed walking robot driven by a microcon
 - `cad/make_cube_disk_3mf.py` - writes a 2-material 3MF (20 mm cube = filament 1, 10 mm x 0.5 mm disk on top = filament 2). No dependencies.
 - `printer/bambu_send.py` - `status`, `send`, `slice` for a P1S over LAN (needs `pip install paho-mqtt`).
 - `examples/cube_disk_2color.3mf` - generated example.
+- `image3d/` - phone-friendly mesh editor (open GLB/OBJ/STL, delete pieces, resize, cut, export STL) plus a small Render service that turns a photo into a model via Hugging Face. See [image3d/README.md](image3d/README.md).
 
 ## Printer setup (P1S)
 1. Settings > WLAN: note IP and Access Code. Serial: Settings > Device.

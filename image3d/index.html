@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Image3D editor</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 16px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1c2430; background: #f3f5f8; overflow: hidden; }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; max-width: 100vw; }
+  #view { flex: 0 0 45%; position: relative; background: #dfe8f2; touch-action: none; min-height: 120px; }
+  #view canvas { display: block; width: 100%; height: 100%; }
+  #view-note { position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: #4a5a6e; pointer-events: none; }
+  #tools { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 10px 12px 24px; -webkit-overflow-scrolling: touch; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #566478; margin: 14px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row > * { flex: 1 1 0; min-width: 0; }
+  button, select, input[type=range], input[type=file], input[type=number], input[type=text], input[type=password] { min-height: 44px; font: inherit; }
+  button { border: 1px solid #b6c0ce; background: #fff; border-radius: 8px; padding: 0 10px; color: #1c2430; }
+  button:active { background: #e3e9f1; }
+  button.primary { background: #1f6feb; color: #fff; border-color: #1a5fcb; }
+  button:disabled { opacity: .5; }
+  select, input[type=number], input[type=text], input[type=password] { border: 1px solid #b6c0ce; border-radius: 8px; padding: 0 8px; background: #fff; width: 100%; }
+  input[type=file] { width: 100%; padding: 8px 4px; }
+  input[type=file]::file-selector-button { min-height: 44px; margin-right: 10px; border: 1px solid #b6c0ce; background: #fff; border-radius: 8px; padding: 0 12px; font: inherit; }
+  input[type=range] { width: 100%; padding: 0; margin: 0; }
+  #pieces { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  #pieces button { text-align: left; display: flex; justify-content: space-between; align-items: center; }
+  #pieces button.sel { background: #fff1dc; border-color: #f08c00; font-weight: 600; }
+  .chk { display: inline-block; padding: 6px 10px; border-radius: 14px; font-size: 14px; margin: 0 6px 6px 0; background: #e8ecf1; }
+  .chk.ok { background: #d9f2df; color: #14532d; }
+  .chk.warn { background: #ffecc2; color: #7a4b00; }
+  .chk.bad { background: #fbd5d5; color: #8a1c1c; }
+  #msg { min-height: 22px; margin: 8px 0; font-weight: 500; }
+  #msg.err { color: #a11; }
+  #howto, #gen-panel { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 10px; margin-top: 14px; font-size: 15px; }
+  #howto a { display: inline-block; padding: 8px 0; color: #1257c4; word-break: break-all; }
+  #gen-panel[hidden] { display: none; }
+  .val { text-align: center; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view"><span id="view-note">Drag to orbit, pinch to zoom, tap a piece to select</span></div>
+  <div id="tools">
+    <h2>Open</h2>
+    <input type="file" id="file" accept=".glb,.obj,.stl" aria-label="Open a model file">
+
+    <h2>Pieces</h2>
+    <div id="pieces"></div>
+    <div class="row"><button id="btn-delete">Delete selected</button><button id="btn-keep-largest">Keep largest</button></div>
+    <div class="row"><button id="btn-small">Remove tiny bits</button><button id="btn-undo" disabled>Undo</button></div>
+
+    <h2>Size (longest side, mm)</h2>
+    <div id="model-size"></div>
+    <div class="row"><input type="number" id="size-mm" value="100" min="1" max="2000" step="1" inputmode="decimal" aria-label="Longest side in millimetres"><button id="btn-size" class="primary">Set size</button></div>
+
+    <h2>Orient</h2>
+    <div class="row"><button id="btn-rot-x">Rotate X</button><button id="btn-rot-y">Rotate Y</button><button id="btn-rot-z">Rotate Z</button></div>
+    <div class="row"><button id="btn-flat">Lay flat on bed</button></div>
+
+    <h2>Cut</h2>
+    <div class="row"><select id="cut-axis" aria-label="Cut axis"><option value="x">Axis X</option><option value="y">Axis Y</option><option value="z" selected>Axis Z (height)</option></select>
+      <select id="cut-keep" aria-label="Keep side"><option value="above">Keep above</option><option value="below">Keep below</option></select></div>
+    <div class="row"><input type="range" id="cut-pos" min="0" max="100" step="0.1" value="50" aria-label="Cut position"><span id="cut-val" class="val" style="flex:0 0 76px">50 mm</span></div>
+    <div class="row"><button id="btn-cut" class="primary">Cut</button></div>
+
+    <h2>Checks</h2>
+    <div><span id="chk-closed" class="chk">no model</span><span id="chk-bed" class="chk">bed</span><span id="chk-count" class="chk">0 pieces</span></div>
+
+    <div id="msg" role="status" aria-live="polite"></div>
+    <div class="row"><button id="btn-export" class="primary">Export STL</button></div>
+
+    <div id="howto">
+      <strong>How to get a model</strong>
+      <p>Generate one from a photo on a free Hugging Face Space, download the GLB, then open it here.</p>
+      <a href="https://huggingface.co/spaces/tencent/Hunyuan3D-2.1" target="_blank" rel="noopener">Hunyuan3D-2.1 Space</a><br>
+      <a href="https://huggingface.co/spaces/trellis-community/TRELLIS" target="_blank" rel="noopener">TRELLIS Space</a>
+    </div>
+
+    <div id="gen-panel" hidden>
+      <strong>Generate from a photo</strong>
+      <div class="row" style="margin-top:8px"><input type="file" id="gen-photo" accept="image/*" aria-label="Photo"></div>
+      <div class="row"><input type="password" id="gen-pass" placeholder="Passcode" autocomplete="off" aria-label="Passcode"></div>
+      <div class="row"><button id="btn-generate" class="primary">Generate</button></div>
+      <div id="gen-status"></div>
+    </div>
+  </div>
+</div>
+
+<script src="../gui/vendor/three.min.js"></script>
+<script src="../gui/vendor/OrbitControls.js"></script>
+<script src="../gui/vendor/jszip.min.js"></script>
+<script src="js/mesh.js"></script>
+<script src="js/stl.js"></script>
+<script src="js/glb.js"></script>
+<script src="js/obj.js"></script>
+<script src="js/readany.js"></script>
+<script>
+(function () {
+  'use strict';
+  var M = I3D.mesh, $ = function (id) { return document.getElementById(id); };
+  var AX = { x: 0, y: 1, z: 2 };
+  var state = { model: [], selected: -1 };
+  var undoStack = [], BED = 256, LIST_MAX = 30;
+  var App = { state: state, serverMode: false };
+
+  // ---------- messages ----------
+  function msg(text, isErr) { var m = $('msg'); m.textContent = text || ''; m.className = isErr ? 'err' : ''; }
+
+  // ---------- 3D view ----------
+  var cutActive = false, renderer, scene, camera, controls, group, planeMesh, bedMesh, glOk = false, needsFit = true;
+  function initView() {
+    var host = $('view');
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch (e) { $('view-note').textContent = '3D view is not available on this device; the tools still work.'; return; }
+    glOk = true;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0xdfe8f2, 1);
+    host.insertBefore(renderer.domElement, host.firstChild);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(40, 1, 1, 5000); camera.up.set(0, 0, 1);
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.9));
+    var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(200, -150, 400); scene.add(sun);
+    group = new THREE.Group(); scene.add(group);
+    var grid = new THREE.GridHelper(BED, 8, 0x8ea0b8, 0xb7c4d6); grid.rotation.x = Math.PI / 2; scene.add(grid);
+    var pm = new THREE.MeshBasicMaterial({ color: 0x1f6feb, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
+    planeMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), pm); planeMesh.visible = false; scene.add(planeMesh);
+    controls.addEventListener('change', render);
+    if (window.ResizeObserver) new ResizeObserver(resize).observe(host); else window.addEventListener('resize', resize);
+    resize();
+    // tap (not drag) selects a piece
+    var down = null, el = renderer.domElement;
+    el.addEventListener('pointerdown', function (e) { down = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+    el.addEventListener('pointerup', function (e) {
+      if (!down) return;
+      var moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = Date.now() - down.t;
+      down = null;
+      if (moved < 8 && dt < 600) pick(e.clientX, e.clientY);
+    });
+  }
+  function resize() {
+    if (!glOk) return;
+    var host = $('view'), w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); render();
+  }
+  function render() { if (glOk) renderer.render(scene, camera); }
+  function fitCamera() {
+    if (!glOk) return;
+    var b = M.bbox(state.model), s = b.size, r = Math.max(Math.hypot(s[0], s[1], s[2]), 20) / 2;
+    var c = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+    var d = r / Math.tan(camera.fov * Math.PI / 360) * 1.1;
+    controls.target.set(c[0], c[1], c[2]);
+    camera.position.set(c[0] + d * 0.6, c[1] - d * 0.8, c[2] + d * 0.5);
+    camera.near = Math.max(d / 100, 0.1); camera.far = d * 20; camera.updateProjectionMatrix();
+    controls.update(); render();
+  }
+  function rebuildMeshes() {
+    if (!glOk) return;
+    while (group.children.length) {
+      var o = group.children.pop();
+      o.geometry.dispose(); o.material.dispose();
+    }
+    state.model.forEach(function (sh, i) {
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sh.v), 3));
+      g.setIndex(sh.v.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(sh.t, 1) : new THREE.Uint16BufferAttribute(sh.t, 1));
+      g.computeVertexNormals();
+      var sel = i === state.selected;
+      var m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: sel ? 0xf08c00 : 0x8aa4c8, roughness: 0.6, metalness: 0.05, flatShading: true, side: THREE.DoubleSide }));
+      m.userData.i = i; group.add(m);
+    });
+    updatePlane();
+    if (needsFit && state.model.length) { fitCamera(); needsFit = false; } else render();
+  }
+  function pick(cx, cy) {
+    var r = renderer.domElement.getBoundingClientRect(), ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
+    var hit = ray.intersectObjects(group.children, false)[0];
+    select(hit ? hit.object.userData.i : -1);
+  }
+  function updatePlane() {
+    if (!glOk) return;
+    var show = state.model.length > 0 && cutActive;
+    planeMesh.visible = show; if (!show) { render(); return; }
+    var a = $('cut-axis').value, v = parseFloat($('cut-pos').value) || 0, b = M.bbox(state.model);
+    var span = Math.max(b.size[0], b.size[1], b.size[2], 10) * 1.3, c = [0, 1, 2].map(function (k) { return (b.min[k] + b.max[k]) / 2; });
+    planeMesh.scale.set(span, span, 1);
+    planeMesh.rotation.set(0, 0, 0);
+    if (a === 'x') { planeMesh.rotation.y = Math.PI / 2; planeMesh.position.set(v, c[1], c[2]); }
+    else if (a === 'y') { planeMesh.rotation.x = Math.PI / 2; planeMesh.position.set(c[0], v, c[2]); }
+    else planeMesh.position.set(c[0], c[1], v);
+    render();
+  }
+
+  // ---------- UI refresh ----------
+  function fmt(n) { return (Math.round(n * 10) / 10).toString(); }
+  function refreshList() {
+    var box = $('pieces'); box.textContent = '';
+    var order = state.model.map(function (s, i) { return { i: i, v: M.volume(s) }; }).sort(function (a, b) { return b.v - a.v; }).slice(0, LIST_MAX);
+    order.forEach(function (o, rank) {
+      var s = M.bbox([state.model[o.i]]).size, b = document.createElement('button');
+      b.type = 'button'; b.dataset.i = o.i; if (o.i === state.selected) b.className = 'sel';
+      var l = document.createElement('span'), r = document.createElement('span');
+      l.textContent = 'Piece ' + (rank + 1); r.textContent = fmt(s[0]) + ' x ' + fmt(s[1]) + ' x ' + fmt(s[2]) + ' mm';
+      b.appendChild(l); b.appendChild(r);
+      b.addEventListener('click', function () { select(o.i); });
+      box.appendChild(b);
+    });
+    if (state.model.length > LIST_MAX) { var n = document.createElement('div'); n.textContent = '+ ' + (state.model.length - LIST_MAX) + ' smaller pieces not listed'; box.appendChild(n); }
+  }
+  function setChk(id, text, cls) { var e = $(id); e.textContent = text; e.className = 'chk ' + cls; }
+  function refreshChecks() {
+    var n = state.model.length;
+    if (!n) { setChk('chk-closed', 'no model', ''); setChk('chk-bed', 'bed', ''); setChk('chk-count', '0 pieces', ''); return; }
+    var closed = state.model.every(M.isClosed), s = M.bbox(state.model).size, fits = Math.max(s[0], s[1], s[2]) <= BED;
+    setChk('chk-closed', closed ? 'Watertight' : 'Not closed (may still print)', closed ? 'ok' : 'warn');
+    setChk('chk-bed', fits ? 'Fits 256 mm bed' : 'Too big for 256 mm bed', fits ? 'ok' : 'bad');
+    setChk('chk-count', n + (n === 1 ? ' piece' : ' pieces'), n === 1 ? 'ok' : 'warn');
+  }
+  function resetCutRange() {
+    var r = $('cut-pos'), a = AX[$('cut-axis').value];
+    if (!state.model.length) { updateCutLabel(); return; }
+    var b = M.bbox(state.model), lo = Math.floor(b.min[a] * 10) / 10, hi = Math.ceil(b.max[a] * 10) / 10;
+    r.min = lo; r.max = hi; r.value = (lo + hi) / 2; updateCutLabel();
+  }
+  function refreshSize() {
+    if (!state.model.length) { $('model-size').textContent = ''; return; }
+    var s = M.bbox(state.model).size;
+    $('model-size').textContent = 'Model: ' + fmt(s[0]) + ' x ' + fmt(s[1]) + ' x ' + fmt(s[2]) + ' mm';
+    $('size-mm').value = fmt(Math.max(s[0], s[1], s[2]));
+  }
+  function updateCutLabel() { $('cut-val').textContent = fmt(parseFloat($('cut-pos').value) || 0) + ' mm'; }
+  function refresh() {
+    cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); rebuildMeshes();
+    $('btn-undo').disabled = !undoStack.length;
+  }
+  function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
+
+  // ---------- model operations ----------
+  // undo memory: 20 steps up to 100,000 triangles in total, 5 steps above that
+  function undoLimit() {
+    var n = 0; state.model.forEach(function (sh) { n += sh.t.length / 3; });
+    return n > 100000 ? 5 : 20;
+  }
+  function apply(fn, okMsg) {
+    var next;
+    try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : String(e.message || e), true); return false; }
+    undoStack.push(state.model); while (undoStack.length > undoLimit()) undoStack.shift();
+    state.model = next; state.selected = -1;
+    refresh(); msg(okMsg || '');
+    return true;
+  }
+  function undo() {
+    if (!undoStack.length) { msg('Nothing to undo.'); return; }
+    state.model = undoStack.pop(); state.selected = -1; refresh(); msg('Undone.');
+  }
+  function needModel() { if (!state.model.length) { msg('Open a model first.', true); return false; } return true; }
+
+  function openBytes(name, bytes) {
+    var soup, shells;
+    try {
+      soup = I3D.readAny(name, bytes);
+      if (!soup || soup.length < 9) throw new Error('empty');
+      shells = M.split(M.weld(soup));
+      if (!shells.length) throw new Error('empty');
+    } catch (e) {
+      var t = String(e && e.message || e);
+      msg(t === 'compressed' ? 'This file is compressed. Re-export it without compression (no Draco or meshopt) and open it again.'
+        : t === 'not a GLB file' ? 'That is not a valid GLB file.'
+        : t === 'unsupported file' ? 'Unsupported file type. Use .glb, .obj or .stl.'
+        : t === 'empty' ? 'That file has no triangles.' : 'Could not read that file: ' + t, true);
+      return false;
+    }
+    var note = '', s = M.bbox(shells).size, longest = Math.max(s[0], s[1], s[2]);
+    if (longest < 5 || longest > 256) { shells = M.scaleToLongest(shells, 100); note = 'Resized to 100 mm'; }
+    state.model = M.layFlat(shells); state.selected = -1; undoStack = []; needsFit = true;
+    refresh(); msg(note || 'Opened ' + name);
+    return true;
+  }
+  function exportStl() { return I3D.stl.write(state.model, 'model'); }
+
+  // Artifact downloads: stl is not an allowed extension there, so save model.zip containing model.stl.
+  // Returns true (saved), 'declined' (viewer said no: no fallback) or false (anything else: use the plain download).
+  async function saveViaClaude(bytes, filename) {
+    try {
+      if (!(window.claude && window.claude.use)) return false;
+      var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 4000); });
+      var d = await Promise.race([window.claude.use('downloads'), timeout]);
+      if (!d) return false;
+      var zip = new JSZip(); zip.file(filename, bytes);
+      var data = await zip.generateAsync({ type: 'uint8array' });
+      await d.save({ filename: filename.replace(/\.stl$/, '.zip'), data: data });
+      return true;
+    } catch (e) {
+      return e && e.code === 'declined' ? 'declined' : false;
+    }
+  }
+  async function doExport() {
+    if (!needModel()) return;
+    var bytes = exportStl(), name = 'model.stl';
+    var closed = state.model.every(M.isClosed), warn = closed ? '' : ' (note: mesh is not closed)';
+    var r = await saveViaClaude(bytes, name);
+    if (r === 'declined') { msg('Download cancelled'); return; }
+    if (r === true) { msg('Saved model.zip (contains model.stl)' + warn); return; }
+    var url = URL.createObjectURL(new Blob([bytes], { type: 'model/stl' })), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    msg(closed ? 'Exported ' + name : 'Exported ' + name + ', but the mesh is not closed; check it in your slicer.');
+  }
+
+  // ---------- wiring ----------
+  $('file').addEventListener('change', function () {
+    var f = this.files && this.files[0], input = this;
+    if (!f) return;
+    f.arrayBuffer().then(function (buf) { openBytes(f.name, new Uint8Array(buf)); input.value = ''; },
+      function () { msg('Could not read that file.', true); });
+  });
+  $('btn-delete').addEventListener('click', function () {
+    if (!needModel()) return;
+    if (state.selected < 0) { msg('Tap a piece first (in the list or in the 3D view).', true); return; }
+    var i = state.selected; apply(function (m) { return M.removePiece(m, i); }, 'Deleted piece.');
+  });
+  $('btn-keep-largest').addEventListener('click', function () { if (needModel()) apply(M.keepLargest, 'Kept the largest piece.'); });
+  $('btn-small').addEventListener('click', function () {
+    if (!needModel()) return;
+    var before = state.model.length;
+    if (apply(function (m) { return M.dropSmall(m, 0.01); })) { var n = before - state.model.length; msg(n ? 'Removed ' + n + ' tiny piece' + (n === 1 ? '' : 's') + '.' : 'No tiny pieces found.'); }
+  });
+  $('btn-size').addEventListener('click', function () {
+    if (!needModel()) return;
+    var mm = parseFloat($('size-mm').value);
+    if (!(mm > 0 && mm <= 2000)) { msg('Enter a size between 1 and 2000 mm.', true); return; }
+    apply(function (m) { return M.layFlat(M.scaleToLongest(m, mm)); }, 'Longest side is now ' + fmt(mm) + ' mm.');
+  });
+  ['x', 'y', 'z'].forEach(function (a) {
+    $('btn-rot-' + a).addEventListener('click', function () { if (needModel()) apply(function (m) { return M.layFlat(M.rotate90(m, a)); }, 'Rotated 90 degrees about ' + a.toUpperCase() + '.'); });
+  });
+  $('btn-flat').addEventListener('click', function () { if (needModel()) apply(M.layFlat, 'Seated on the bed.'); });
+  function cutTouched() { cutActive = true; updatePlane(); }
+  ['cut-axis', 'cut-pos', 'cut-keep'].forEach(function (id) {
+    ['focus', 'pointerdown', 'input', 'change'].forEach(function (ev) { $(id).addEventListener(ev, cutTouched); });
+  });
+  $('cut-axis').addEventListener('change', function () { resetCutRange(); updatePlane(); });
+  $('cut-pos').addEventListener('input', function () { updateCutLabel(); updatePlane(); });
+  $('btn-cut').addEventListener('click', function () {
+    if (!needModel()) return;
+    var a = $('cut-axis').value, v = parseFloat($('cut-pos').value), keep = $('cut-keep').value;
+    apply(function (m) { return M.layFlat(M.cut(m, a, v, keep)); }, 'Cut at ' + a.toUpperCase() + ' = ' + fmt(v) + ' mm.');
+  });
+  $('btn-undo').addEventListener('click', undo);
+  $('btn-export').addEventListener('click', doExport);
+
+  // passcode is remembered on this device only
+  try { var p = localStorage.getItem('image3d.pass'); if (p) $('gen-pass').value = p; } catch (e) { /* storage blocked */ }
+  $('gen-pass').addEventListener('input', function () { try { localStorage.setItem('image3d.pass', this.value); } catch (e) { /* storage blocked */ } });
+
+  // server mode: only when the Render app answers /api/health
+  function checkServer() {
+    if (!/^https?:$/.test(location.protocol) || typeof fetch !== 'function') return Promise.resolve();
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 3000) : null;
+    return fetch('api/health', ctl ? { signal: ctl.signal } : {})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.ok === true) { App.serverMode = true; $('gen-panel').hidden = false; $('howto').hidden = true; } })
+      .catch(function () { /* not server mode */ })
+      .then(function () { if (timer) clearTimeout(timer); });
+  }
+
+  // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor
+  var generating = false;
+  var wakeLock = null;
+  function holdWake() {
+    try {
+      if (!generating || wakeLock || !navigator.wakeLock) return;
+      var p = navigator.wakeLock.request('screen');
+      if (!p || !p.then) return;
+      wakeLock = true; // claimed now so a second call cannot request again
+      p.then(function (l) { if (generating) wakeLock = l; else { wakeLock = null; try { l.release(); } catch (e) { /* ignore */ } } },
+        function () { wakeLock = null; });
+    } catch (e) { wakeLock = null; }
+  }
+  function dropWake() {
+    var l = wakeLock; wakeLock = null;
+    try { if (l && l.release) l.release(); } catch (e) { /* ignore */ }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { if (wakeLock && wakeLock !== true) wakeLock = null; holdWake(); }
+  });
+  function setGenerating(on, text) { generating = on; if (on) holdWake(); else dropWake(); $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
+  // downsize the photo before upload: longest side <= 1024 px, JPEG 0.9; the original file if decoding fails
+  function shrinkPhoto(file) {
+    return new Promise(function (resolve) {
+      var url = null, done = false;
+      function finish(v) { if (done) return; done = true; if (url) URL.revokeObjectURL(url); resolve(v); }
+      try {
+        url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, 1024 / Math.max(w, h));
+            if (!w || !h) return finish(file);
+            var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+            var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+            c.toBlob(function (b) { if (!b) return finish(file); try { finish(new File([b], 'photo.jpg', { type: 'image/jpeg' })); } catch (e) { b.name = 'photo.jpg'; finish(b); } }, 'image/jpeg', 0.9);
+          } catch (e) { finish(file); }
+        };
+        img.onerror = function () { finish(file); };
+        img.src = url;
+      } catch (e) { finish(file); }
+    });
+  }
+  $('btn-generate').addEventListener('click', function () {
+    if (generating) return;
+    var file = $('gen-photo').files && $('gen-photo').files[0];
+    if (!file) { msg('Choose a photo first.', true); return; }
+    setGenerating(true, 'Generating... keep this screen open (about a minute or two)');
+    msg('');
+    shrinkPhoto(file).then(function (up) {
+      var fd = new FormData(); fd.append('image', up, up.name || 'photo.jpg');
+      return fetch('api/generate', { method: 'POST', headers: { 'X-Passcode': $('gen-pass').value }, body: fd });
+    })
+      .then(function (r) {
+        if (r.ok) return r.arrayBuffer().then(function (buf) { setGenerating(false); openBytes('generated.glb', new Uint8Array(buf)); });
+        return r.json().then(function (j) { return j && j.detail; }, function () { return null; })
+          .then(function (d) { throw new Error(typeof d === 'string' && d ? d : 'Server error ' + r.status); });
+      })
+      .catch(function (e) { setGenerating(false); msg(e instanceof TypeError ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e), true); });
+  });
+
+  initView();
+  refresh();
+  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
+  App.ready = checkServer();
+  window.I3DApp = App;
+})();
+</script>
+</body>
+</html>
