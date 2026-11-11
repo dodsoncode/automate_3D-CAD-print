@@ -53,6 +53,12 @@ console.log(JSON.stringify({a:a.t.length/3,b:b.v.length/3,bt:b.t.length/3}));"""
     assert o["a"] == 12 and o["b"] == 8 and o["bt"] == 24
 
 
+def test_weld_accepts_typed_array_soup():
+    o = node("""const sp=soup([cube(20)]);const a=mesh.weld(new Float32Array(sp)), b=mesh.weld(new Float64Array(sp));
+console.log(JSON.stringify({av:a.v.length/3,at:a.t.length/3,bv:b.v.length/3,closed:mesh.isClosed(a),vol:mesh.volume(a)}));""")
+    assert o == {"av": 8, "at": 12, "bv": 8, "closed": True, "vol": o["vol"]} and abs(o["vol"] - 8000) < 1e-6
+
+
 def test_split_two_cubes():
     o = node("""const s=mesh.weld(soup([cube(20),cube(10,[50,0,0])]));const p=mesh.split(s);
 console.log(JSON.stringify({n:p.length,vols:p.map(mesh.volume)}));""")
@@ -121,6 +127,23 @@ const m=[{v:v,t:t.t}], tot=mesh.volume(m[0]), bad=[];
     if(!up.concat(dn).every(mesh.isClosed)||Math.abs(vol-tot)>1e-6*tot)bad.push([ax,val]);}});
 console.log(JSON.stringify({bad:bad}));""")
     assert o["bad"] == []
+
+
+def test_cut_fine_wavy_cylinder_stays_closed():
+    # fine cap loops (thousands of tiny, nearly flat ears) used to leave T-junctions against the walls
+    o = node("""function cyl(N){const v=[],t=[],R=4,H=20;
+  for(let r=0;r<R;r++)for(let i=0;i<N;i++){const a=2*Math.PI*i/N,rad=10*(1+0.3*Math.sin(5*a));v.push(rad*Math.cos(a),rad*Math.sin(a),H*r/(R-1));}
+  const cb=v.length/3;v.push(0,0,0);const ct=cb+1;v.push(0,0,H);
+  for(let r=0;r<R-1;r++)for(let i=0;i<N;i++){const j=(i+1)%N,a=r*N+i,b=r*N+j,c=(r+1)*N+i,d=(r+1)*N+j;t.push(a,b,d,a,d,c);}
+  for(let i=0;i<N;i++){const j=(i+1)%N;t.push(cb,j,i);t.push(ct,(R-1)*N+i,(R-1)*N+j);}
+  return {v:v,t:t};}
+const res=[];[5000,6000].forEach(N=>{const s=cyl(N),tot=mesh.volume(s);
+  const up=mesh.cut([s],'z',7,'above'),dn=mesh.cut([s],'z',7,'below');
+  res.push({N:N,input:mesh.isClosed(s),up:up.every(mesh.isClosed),dn:dn.every(mesh.isClosed),
+    vol:up.concat(dn).reduce((a,x)=>a+mesh.volume(x),0)-tot});});
+console.log(JSON.stringify(res));""")
+    for r in o:
+        assert r["input"] and r["up"] and r["dn"] and abs(r["vol"]) < 1e-6 * 1e4, r
 
 
 def test_cut_drops_pieces_entirely_removed():

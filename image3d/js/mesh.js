@@ -26,7 +26,7 @@
   // positions: flat triangle soup (9 numbers per triangle) or an indexed {v,t}; merges vertices closer than ~tol
   function weld(positions, tol) {
     tol = tol || 1e-5;
-    var src = Array.isArray(positions) ? null : positions;
+    var src = positions && positions.v && positions.t ? positions : null; // else a flat soup: Array or typed array
     var pv = src ? src.v : positions, n = pv.length / 3;
     var seen = new Map(), remap = new Int32Array(n), v = [], i;
     for (i = 0; i < n; i++) {
@@ -176,14 +176,18 @@
       var p = pos(ids[i]); X.push(p[0]); Y.push(p[1]); prev.push((i + n - 1) % n); next.push((i + 1) % n);
       minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); miny = Math.min(miny, p[1]); maxy = Math.max(maxy, p[1]);
     }
-    var ext = Math.max(maxx - minx, maxy - miny), areaEps = 1e-12 * ext * ext;
+    var ext = Math.max(maxx - minx, maxy - miny), dtol = 1e-12 * ext; // distance tolerance: anything closer than this to a line counts as on it
     function cr(a, b, c) { return cross2(X[a], Y[a], X[b], Y[b], X[c], Y[c]); }
     function same(a, b) { return X[a] === X[b] && Y[a] === Y[b]; }
+    function dist(a, b) { return Math.hypot(X[b] - X[a], Y[b] - Y[a]); }
+    // strictly convex corner, judged by the height of c above line a-b (not by area, which vanishes for fine loops)
+    function convex(a, b, c) { return cr(a, b, c) > dtol * dist(a, b); }
     function isEar(a, b, c) {
+      var tab = dtol * dist(a, b), tbc = dtol * dist(b, c), tca = dtol * dist(c, a);
       for (var m = next[c]; m !== a; m = next[m]) {
         if (same(m, a) || same(m, b) || same(m, c)) continue; // bridge duplicates sit exactly on ear corners
         // inside or on an edge (within float noise): a diagonal through a vertex would leave a T-junction
-        if (cr(a, b, m) >= -areaEps && cr(b, c, m) >= -areaEps && cr(c, a, m) >= -areaEps) return false;
+        if (cr(a, b, m) >= -tab && cr(b, c, m) >= -tbc && cr(c, a, m) >= -tca) return false;
       }
       return true;
     }
@@ -196,18 +200,18 @@
     while (left > 3) {
       var found = -1, k = cur, tries = 0;
       do {
-        if (cr(prev[k], k, next[k]) > areaEps && isEar(prev[k], k, next[k])) { found = k; break; }
+        if (convex(prev[k], k, next[k]) && isEar(prev[k], k, next[k])) { found = k; break; }
         k = next[k]; tries++;
       } while (tries < left);
       if (found < 0) { // degenerate input: clip the most convex corner anyway, or drop a flat one
         var bestK = -1, bestC = -Infinity;
         k = cur;
-        for (tries = 0; tries < left; tries++, k = next[k]) { var cv = cr(prev[k], k, next[k]); if (cv > bestC) { bestC = cv; bestK = k; } }
-        cur = clip(bestK, bestC > areaEps);
+        for (tries = 0; tries < left; tries++, k = next[k]) { var cv = cr(prev[k], k, next[k]) / (dist(prev[k], k) || 1); if (cv > bestC) { bestC = cv; bestK = k; } }
+        cur = clip(bestK, bestC > dtol);
       } else cur = clip(found, true);
       left--;
     }
-    if (left === 3 && cr(prev[cur], cur, next[cur]) > areaEps) tris.push([ids[prev[cur]], ids[cur], ids[next[cur]]]);
+    if (left === 3 && convex(prev[cur], cur, next[cur])) tris.push([ids[prev[cur]], ids[cur], ids[next[cur]]]);
     return tris;
   }
 

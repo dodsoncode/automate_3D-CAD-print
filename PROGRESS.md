@@ -170,7 +170,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 
 ### 2026-11-11 - Image3D Task 1: mesh.js + stl.js (TI3)
 - DONE: `image3d/js/mesh.js` (weld, split, bbox, volume, isClosed, scale, scaleToLongest, rotate90, layFlat, removePiece, keepLargest, dropSmall, cut) and `image3d/js/stl.js` (binary write, binary/ASCII read). Dependency-free UMD (`I3D.mesh`, `I3D.stl`). `cut` clips each shell, shares one vertex per cut edge with the cap, and ear-clips the cap with nested loops as holes; a cut that leaves a shell in separate pieces returns them as separate shells.
-- Tests: `image3d/tests/test_mesh.py` - 16 pass (Node snippets from pytest). Includes a skewed off-centre tube cut on all three axes (closed + volume conserved), which caught a T-junction bug in cap triangulation during development.
+- Review fixes: cap ear-clipping now uses a distance tolerance (fine cap loops of thousands of vertices used to come out open), and `weld` accepts Float32Array/Float64Array soups.
+- Tests: `image3d/tests/test_mesh.py` - 18 pass (~4 s) (Node snippets from pytest). Includes a skewed off-centre tube cut on all three axes (closed + volume conserved), which caught a T-junction bug in cap triangulation during development.
 - Verification: script-checked only (Node under pytest). Not tried on a real generated mesh, in a browser or on a phone.
 - NEXT: Task 2 (file readers: GLB/OBJ/STL into shells).
 - BLOCKED: nothing.
