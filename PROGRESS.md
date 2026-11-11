@@ -8,7 +8,7 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor): spec written, awaiting Jacob's review
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor) is built and desktop-tested; the editor is published as a claude.ai artifact. Waiting on Jacob for TI6 (try the artifact editor on the phone) and TI7 (Hugging Face token + Render deploy, first real test of generation)
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -199,3 +199,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - BLOCKED: nothing.
 - 2026-11-11 Image3D Task 4 round-1 fixes: upload limit and passcode now enforced by an ASGI guard before the multipart body is read (500, then 401, then 413 on Content-Length or streamed bytes, also chunked); Hugging Face call now `submit(api_name='/shape_generation', image=handle_file(...))` against default Space `tencent/Hunyuan3D-2` (env `HF_SPACE`, `HF_API_NAME`, `HF_IMAGE_PARAM`; empty `HF_API_NAME` = auto-pick fallback); page downsizes the photo to a 1024 px JPEG before upload; docs/openapi disabled, error detail capped at 300 chars, 5-wrong-passcode throttle (429 for 10 min per IP). Tests: server + page 45 pass, FAKE generator and fake `gradio_client` only; live Hugging Face call and Render deploy still NOT verified.
 - 2026-11-11 Image3D Task 4 round-2 fix: throttle key is now the LAST X-Forwarded-For entry (the one Render's proxy adds), a global backstop (more than 30 wrong passcodes from all clients in 10 minutes -> 429 for everyone, not reset by a correct passcode), and the per-key tables are swept and capped at 1000 keys. `DEPLOY.md` asks for a long passcode and explains "too many attempts". Tests: `test_server.py` 32 pass (injectable clock); NOT tried behind the real Render proxy.
+
+### 2026-11-11 - Image3D Task 5: docs and full test run
+- DONE: `image3d/README.md` updated (two ways to use it, files table, tests, verification status); root `README.md` Layout lists `image3d/`; "Current status" above mentions image3d. Full run `python -m pytest -q image3d/tests gui/tests && (cd firmware && python -m pytest -q)`: 101 passed (image3d + gui), 39 passed (firmware); nothing existing broken.
+- Verification: mesh maths and readers script-checked; page tested in a desktop browser at phone size (Playwright), NOT on a real phone; server tested with a FAKE generator. NOT verified: the live Hugging Face call, the Render deploy, and the artifact's `model.zip` download inside the real Claude app.
+- NEXT: Jacob does TI6 (try the artifact editor on the phone with a GLB from a Hugging Face Space page) and TI7 (Hugging Face token + Render deploy, one photo through). Controller pushes the branch and opens the PR to `main` (not merged).
+- BLOCKED: nothing.
