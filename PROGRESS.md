@@ -163,3 +163,7 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 ### 2026-11-11 - Image3D step 2: spec revised for phone use
 - DONE: Jacob said the tool must work on a phone. Checked artifact rules: an artifact can host the editor and offer downloads but cannot call other sites. Spec now: one editor page delivered (a) as a claude.ai artifact (open GLB/OBJ/STL -> edit -> STL) and (b) from a small Render app that adds photo -> Hugging Face generation with the token kept server-side.
 - NEXT: Jacob reviews the spec (TI2).
+
+### 2026-11-11 - Image3D step 3: spec approved, implementation plan
+- DONE: Jacob approved the spec (TI2) and confirmed Render free instance alongside mental_stength. Plan written: `docs/superpowers/plans/2026-11-11-image3d.md` (5 tasks: mesh maths, file readers, editor page + artifact, Render service, docs + PR).
+- NEXT: Jacob glances at the plan and picks how to run it; then Task 1.
