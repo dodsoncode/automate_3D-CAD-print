@@ -254,3 +254,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: Jacob approved building "Slice for P1S" on the free Render instance, keeping Handy (no Developer Mode / relay), with Bambu PLA Basic and PLA Silk+ among the filaments. Spec: `docs/superpowers/specs/2026-11-12-p1s-slicing-design.md`. Plan: `docs/superpowers/plans/2026-11-12-p1s-slicing.md` (4 tasks).
 - Extra spike findings (script-checked in Claude's workspace): the PLA Silk+ P1S profile slices (230 C); the engine does NOT centre an STL - an origin-centred model gave extruding moves at negative X (off the bed), fixed by moving the model to (128, 128) first; engine options must be passed as strings (a numeric `enable_support: 1` was silently ignored). The design therefore centres the model and checks every result (settings and bed bounds) before offering it.
 - NEXT: Jacob reviews spec + plan; then build (subagent per task, reviewed).
+
+### 2026-11-12 - P1S slicing: build started
+- Substep: Jacob approved the spec and plan (06:20) and asked for a PROGRESS entry for every step and substep.
+- Substep: controller pre-flight scan of the plan done; three small rulings recorded (error type signature, validation order, how the supports check compares values). No conflicts between tasks.
+- NEXT: Task 1 (slicer core) with a builder, then independent review.
