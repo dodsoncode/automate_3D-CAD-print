@@ -285,3 +285,11 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Fix round 3 - rules: after the first FEATURE, G18/G19, decimal G0-G3/G90-G92 codes, M206/M428/G10/G53-G59 and any non-G/M line with an X, Y, E, I, J or G word are "unsupported move" (a bare `T0` passes, `G17` and `G29.2 S0` pass, `N10 G1 ...` still works); repeated X/Y/E/I/J/R words and G/M words glued to a number are "unreadable move". Before the first FEATURE the same lines make the position unknown and mark the modal state as changed, so the first extruding move afterwards is refused.
 - Fix round 3 - real output: `/tmp/orca/silk_c.gcode.3mf` (312,111 lines) still checks clean in 1.61 s. After its first FEATURE: decimal G codes none; M codes carrying X/Y/E words: M1002 x2 (text), M17 x1 (neither is M206/M428); non-G/M lines: one `T255`; repeated words 0; glued words 0; G10/G18/G19/G53-G59 none. Nothing real rejected, nothing loosened.
 - Fix round 3 - green: test_slicing.py 112 passed, 0 skipped (both real-engine tests ran); whole image3d/tests 202 passed.
+
+### 2026-11-12 - P1S slicing Task 1: independent review closed
+- Substep: first review found the model check accepted not-a-number coordinates and the G-code bed check could be fooled (inherited positions, arcs, odd spellings). Fix round 1 closed those.
+- Substep: second review found six more wrong-accept paths in the rewritten check (zero-sweep arcs, extrusion-mode switches, exponent numbers, position resets, other motion commands, files with no print moves). Fix round 2 closed those.
+- Substep: third review found five remaining gaps (plane changes, decimal G codes, lines without a command, repeated or glued words, coordinate offsets). Fix round 3 closed those; the final re-review confirmed all findings addressed with no new important issues.
+- Result: `image3d/tests/test_slicing.py` 112 passed with both real-engine slices running; a real 312,111-line sliced file passes the check in about 1.6 s. Verification level: script-checked with the real engine in Claude's workspace; nothing printed, nothing run on Render.
+- Left for later (minor): the glued-word rule is not applied to non-motion lines; only X/Y are bounds-checked (not Z).
+- NEXT: Task 2 (server slice job).
