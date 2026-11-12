@@ -113,7 +113,13 @@ def test_options_tables():
 
 # ---------- check_gcode ----------
 def gcode(printer="Bambu Lab P1S", nozzle="0.4", filament="Bambu PLA Basic @BBL P1S 0.4 nozzle",
-          process="0.20mm Standard @BBL X1C", plate="Textured PEI Plate", support="0", body=None):
+          process="0.20mm Standard @BBL X1C", plate="Textured PEI Plate", support="0", body=None,
+          temps=None, heat="M190 S55 ; set bed temperature and wait for it to be reached"):
+    t = {"cool_plate_temp": 35, "textured_plate_temp": 55, "hot_plate_temp": 55}
+    t.update(temps or {})
+    temp_lines = []
+    for key, val in t.items():
+        temp_lines += ["; %s = %s" % (key, val), "; %s_initial_layer = %s" % (key, val)]
     if body is None:
         body = "M83\nG1 X120 Y130 E0.5 F1800\nG1 X121.5 Y130 E0.7"
     return "\n".join([
@@ -128,8 +134,10 @@ def gcode(printer="Bambu Lab P1S", nozzle="0.4", filament="Bambu PLA Basic @BBL 
         "; print_settings_id = " + process,
         "; curr_bed_type = " + plate,
         "; enable_support = " + support,
+        *temp_lines,
         "; machine_start_gcode = " + "G28 ; home\\n" * 400,
         "; CONFIG_BLOCK_END",
+        *([heat] if heat else []),
         "G1 X-10 Y-5 E0.1 F900",                      # start-up purge before the first feature
         "G1 X110 Y110 F3000",
         "; FEATURE: Outer wall",
@@ -319,13 +327,177 @@ REAL_LINES = ['G1 X10.1 Y20 Z0.28 F5000.0 ;Move to start position', 'M109 S205;'
 
 def test_check_gcode_accepts_real_engine_lines():
     """44 consecutive lines copied from real engine output: start purge, M83, retract, travel, support, arcs."""
-    body = "\n".join(REAL_LINES)
+    body = "; FEATURE: Custom\n" + "\n".join(REAL_LINES)     # the purge line sits in the engine's Custom feature
     assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
 
 
 @pytest.mark.parametrize("body", MOVE_ACCEPTS)
 def test_check_gcode_accepts_safe_moves(body):
     assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
+
+
+# ---------- A1: the bed must heat ----------
+def test_incompatible_pair_is_refused():
+    assert slicing.INCOMPATIBLE == {("petg_hf", "cool")}
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.settings_for({"filament": "petg_hf", "plate": "cool"})
+    assert e.value.status == 400
+    assert str(e.value) == "Bambu PETG HF cannot be printed on the Cool Plate - choose another plate"
+    assert slicing.settings_for({"filament": "petg_hf", "plate": "textured_pei"})["filament"].startswith("Bambu PETG HF")
+    assert slicing.settings_for({"filament": "pla_basic", "plate": "cool"})["options"]["curr_bed_type"] == "Cool Plate"
+
+
+@pytest.mark.parametrize("plate_name,plate_id,key", [
+    ("Cool Plate", "cool", "cool_plate_temp"),
+    ("Textured PEI Plate", "textured_pei", "textured_plate_temp"),
+    ("High Temp Plate", "smooth_pei", "hot_plate_temp"),
+])
+@pytest.mark.parametrize("suffix", ["", "_initial_layer"])
+def test_check_gcode_rejects_zero_bed_temperature(plate_name, plate_id, key, suffix):
+    g = gcode(plate=plate_name, temps={key + suffix: 0}) if not suffix else gcode(plate=plate_name)
+    if suffix:
+        g = g.replace("; %s_initial_layer = " % key + ("35" if key.startswith("cool") else "55"),
+                      "; %s_initial_layer = 0" % key)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(g, slicing.settings_for({"plate": plate_id}))
+    assert e.value.status == 500 and "bed temperature is 0 for this plate" in str(e.value) and key in str(e.value)
+
+
+def test_check_gcode_only_looks_at_the_chosen_plates_temperature():
+    g = gcode(temps={"cool_plate_temp": 0, "cool_plate_temp_initial_layer": 0})   # textured plate chosen
+    assert slicing.check_gcode(g, slicing.settings_for({}))["layers"] == 348
+
+
+def test_check_gcode_needs_bed_temperature_in_the_config():
+    g = gcode().replace("; textured_plate_temp_initial_layer = 55\n", "")
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(g, slicing.settings_for({}))
+    assert "textured_plate_temp_initial_layer" in str(e.value) and "missing" in str(e.value)
+
+
+@pytest.mark.parametrize("heat", [None, "M190 S0", "M140 S0", "M140 S55\nM140 S0", "M104 S200", "M190 R40"])
+def test_check_gcode_needs_a_bed_heat_command_before_printing(heat):
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(heat=heat), slicing.settings_for({}))
+    assert e.value.status == 500 and "bed temperature is 0 for this plate" in str(e.value)
+
+
+def test_check_gcode_bed_heat_after_the_first_feature_is_too_late():
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(heat=None, body="M190 S55\nG1 X120 Y130 E0.5"), slicing.settings_for({}))
+    assert "bed temperature is 0 for this plate" in str(e.value)
+
+
+@pytest.mark.parametrize("heat", ["M190 S55", "M140 S60", "M140 S55\nM190 S55 ; wait", "M140 S0\nM140 S35", "M190 S35.5"])
+def test_check_gcode_accepts_bed_heat_commands(heat):
+    assert slicing.check_gcode(gcode(heat=heat), slicing.settings_for({}))["layers"] == 348
+
+
+# ---------- A2: exact filament, exactly one gcode entry ----------
+def test_check_gcode_filament_must_match_exactly():
+    for bad in ("Bambu PLA Basic @BBL P1S 0.4 nozzle copy", "x Bambu PLA Basic @BBL P1S 0.4 nozzle"):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.check_gcode(gcode(filament=bad), slicing.settings_for({}))
+        assert "filament_settings_id" in str(e.value)
+
+
+def zip_run(monkeypatch, tmp_path, entries):
+    def run(cmd, **kw):
+        with zipfile.ZipFile(cmd[-2], "w") as z:
+            for name, data in entries.items():
+                z.writestr(name, data)
+        return subprocess.CompletedProcess([], 0, stdout='RESULT {"ok":true}\n', stderr="")
+    monkeypatch.setattr(slicing.subprocess, "run", run)
+    return slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+
+
+@pytest.mark.parametrize("entries", [
+    {"Metadata/plate_1.gcode": None, "Metadata/plate_2.gcode": None},
+    {"Metadata/plate_2.gcode": None},
+    {"Metadata/plate_1.gcode": None, "Other/evil.gcode": None},
+    {"Metadata/plate_1.gcode": None, "x/plate_1.gcode": None},
+])
+def test_run_slice_needs_exactly_one_gcode_entry(monkeypatch, tmp_path, entries):
+    entries = {k: gcode() for k in entries}
+    with pytest.raises(slicing.SliceError) as e:
+        zip_run(monkeypatch, tmp_path, entries)
+    assert e.value.status == 500 and "unexpected print data in the file" in str(e.value)
+    assert not os.path.exists(tmp_path / "model.gcode.3mf")
+
+
+def test_run_slice_other_entries_are_fine(monkeypatch, tmp_path):
+    path, _ = zip_run(monkeypatch, tmp_path, {"Metadata/plate_1.gcode": gcode(), "Metadata/plate_1.gcode.md5": "x",
+                                              "3D/3dmodel.model": "<m/>"})
+    assert os.path.exists(path)
+
+
+# ---------- A3: the excluded corner ----------
+@pytest.mark.parametrize("move", ["G1 X10 Y20 E1", "G1 X17.9 Y27.9 E1", "G1 X0.5 Y0.5 E1"])
+def test_check_gcode_rejects_extrusion_in_the_excluded_corner(move):
+    for body in ("G1 X100 Y100 F9000\n" + move,                      # end point inside
+                 "G1 X10 Y20 F9000\nG1 X100 Y100 E1"):               # start point inside
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.check_gcode(gcode(body=body), slicing.settings_for({}))
+        assert e.value.status == 500 and "extruding move in the excluded bed corner" in str(e.value)
+
+
+def test_check_gcode_rejects_an_arc_that_sweeps_through_the_corner():
+    body = "G1 X30 Y20 F9000\nG2 X30 Y20.5 I-10 J0 E1"      # full-ish circle around (20, 20): passes (10, 20)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(body=body), slicing.settings_for({}))
+    assert "excluded bed corner" in str(e.value)
+
+
+@pytest.mark.parametrize("body", [
+    "G1 X18 Y40 F9000\nG1 X18 Y100 E1",              # on the edge x = 18 is outside the rectangle
+    "G1 X40 Y28 F9000\nG1 X100 Y28 E1",              # on the edge y = 28
+    "G1 X10 Y20 F9000\nG1 X100 Y100 E0 F9000",       # travel through the corner
+    "M83\nG1 X10 Y20 F9000\nG1 X10 Y20 E-0.8",        # retract inside the corner
+    "G1 X10 Y10 F9000\nG1 X12 Y10 E0 F9000",
+])
+def test_check_gcode_corner_accepts_edges_and_travel(body):
+    assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
+
+
+def test_check_gcode_corner_is_allowed_for_the_custom_feature_only():
+    purge = "G1 X10.1 Y20 F5000\nG1 X10.1 Y200 E15\nG1 X10.4 Y200 F5000\nG1 X10.4 Y20 E30"
+    g = gcode(body="; FEATURE: Custom\n" + purge + "\n; FEATURE: Outer wall\nG1 X100 Y100 F9000\nG1 X120 Y100 E1")
+    assert slicing.check_gcode(g, slicing.settings_for({}))["layers"] == 348
+    g = gcode(body="; FEATURE: Custom\n" + purge + "\n; FEATURE: Outer wall\nG1 X10.4 Y20 F9000\nG1 X10.4 Y100 E1")
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(g, slicing.settings_for({}))
+    assert "excluded bed corner" in str(e.value)
+
+
+# ---------- A4: floating regions ----------
+ENGINE_FLOATING = ("DEBUG: noise\n[warning] Print warning: It seems object m.stl has floating regions. "
+                   "Please re-orient the object or enable support generation.\n"
+                   "DEBUG: Exception caught: Errors\nRESULT {\"ok\":false,\"error\":\"Slicing failed\"}\n")
+
+
+@pytest.mark.parametrize("supports,message", [
+    ("off", "This model has overhanging parts that would print in mid-air. Turn on Tree supports, cut a flat base, "
+            "or delete loose pieces, then slice again."),
+    ("tree", "The slicer could not support this model's overhanging parts. Cut a flat base or delete loose pieces, "
+             "then slice again."),
+])
+def test_floating_regions_give_a_plain_message(monkeypatch, tmp_path, caplog, supports, message):
+    fake_run(monkeypatch, subprocess.CompletedProcess([], 1, stdout=ENGINE_FLOATING, stderr="x" * 400))
+    with caplog.at_level("WARNING", logger="image3d.slicing"):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {"supports": supports}, str(tmp_path))
+    assert e.value.status == 400 and str(e.value) == message
+    assert "floating regions" in caplog.text and "Exception caught" in caplog.text
+
+
+def test_other_engine_failures_keep_the_generic_message(monkeypatch, tmp_path, caplog):
+    fake_run(monkeypatch, subprocess.CompletedProcess([], 1, stdout='DEBUG: noise\nRESULT {"ok":false,"error":"boom"}\n',
+                                                      stderr=""))
+    with caplog.at_level("WARNING", logger="image3d.slicing"):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    assert e.value.status == 500 and str(e.value).startswith("slicer failed: ") and "boom" in str(e.value)
+    assert "boom" in caplog.text
 
 
 # ---------- run_slice with a faked engine ----------
@@ -435,3 +607,33 @@ def test_real_slice_defaults(tmp_path):
     path, summary = slicing.run_slice(stl_bytes(box_tris(20, 20, 20, -10, -10, 0)), {}, str(tmp_path))
     assert slicing.check_gcode(read_gcode(path), slicing.settings_for({}))["filament_g"] > 0
     assert summary["print_time"]
+
+
+TIP = [((0, 0, 0), (10, 0, 10), (0, 10, 10)), ((0, 0, 0), (0, 10, 10), (-10, 0, 10)),
+       ((0, 0, 0), (-10, 0, 10), (0, -10, 10)), ((0, 0, 0), (0, -10, 10), (10, 0, 10)),
+       ((0, 0, 20), (0, 10, 10), (10, 0, 10)), ((0, 0, 20), (-10, 0, 10), (0, 10, 10)),
+       ((0, 0, 20), (0, -10, 10), (-10, 0, 10)), ((0, 0, 20), (10, 0, 10), (0, -10, 10))]
+
+
+@needs_engine
+def test_real_engine_floating_regions_message(tmp_path):
+    """An octahedron standing on one corner: the engine warns 'floating regions' and fails."""
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(TIP), {"supports": "off"}, str(tmp_path))
+    assert e.value.status == 400 and str(e.value).startswith("This model has overhanging parts")
+
+
+@needs_engine
+def test_real_slice_pla_basic_on_cool_plate_passes(tmp_path):
+    path, summary = slicing.run_slice(stl_bytes(box_tris(20, 20, 20, -10, -10, 0)), {"plate": "cool"}, str(tmp_path))
+    assert summary["plate"] == "Cool Plate" and summary["filament_g"] > 0
+    assert "M190 S35" in read_gcode(path)
+
+
+@needs_engine
+def test_real_engine_refuses_petg_on_cool_plate_before_slicing(tmp_path):
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, -10, -10, 0)), {"filament": "petg_hf", "plate": "cool"},
+                          str(tmp_path))
+    assert e.value.status == 400 and "cannot be printed on the Cool Plate" in str(e.value)
+    assert not os.path.exists(tmp_path / "model.stl")

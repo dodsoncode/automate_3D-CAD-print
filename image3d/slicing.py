@@ -5,6 +5,7 @@ raises at import when Node, the engine or the profiles are missing: available() 
 Every result is checked (printer, nozzle, filament, quality, plate, supports, bed bounds) before it is returned.
 """
 import json
+import logging
 import math
 import os
 import re
@@ -22,6 +23,10 @@ TIMEOUT_S = 900
 GCODE_ENTRY = "Metadata/plate_1.gcode"
 OUTPUT_NAME = "model.gcode.3mf"
 ENGINE_TAIL = 300
+EXCLUDED_CORNER = (18.0, 28.0)   # P1S bed_exclude_area: front-left, x 0-18 mm by y 0-28 mm
+BED_TEMP_KEYS = {"Cool Plate": "cool_plate_temp", "Textured PEI Plate": "textured_plate_temp",
+                 "High Temp Plate": "hot_plate_temp"}
+log = logging.getLogger("image3d.slicing")
 
 
 class SliceError(ValueError):
@@ -59,6 +64,9 @@ OPTIONS = {
         _row("tree", "Tree (auto)", "tree(auto)"),
     ],
 }
+# (filament id, plate id) pairs Bambu's profile does not support: the engine slices them anyway, with a bed that never
+# heats (cool_plate_temp = 0). Checked against the real profiles: every other pair has a bed temperature above 0.
+INCOMPATIBLE = {("petg_hf", "cool")}
 # Engine option values must be strings: a numeric 1 is silently ignored.
 SUPPORT_OPTIONS = {
     "off": {"enable_support": "0"},
@@ -136,6 +144,9 @@ def settings_for(choice):
         if row is None:
             raise SliceError(400, "unknown %s option: %s" % (key, want))
         picked[key] = row
+    if (picked["filament"]["id"], picked["plate"]["id"]) in INCOMPATIBLE:
+        raise SliceError(400, "Bambu %s cannot be printed on the %s - choose another plate"
+                         % (picked["filament"]["label"], picked["plate"]["label"]))
     options = {"curr_bed_type": picked["plate"]["profile"]}
     options.update(SUPPORT_OPTIONS[picked["supports"]["id"]])
     return {"printer": PRINTER, "filament": picked["filament"]["profile"], "process": picked["quality"]["profile"],
@@ -221,14 +232,21 @@ def _check_moves(lines):
     e_mode = None           # "abs" (M82), "rel" (M83); None until declared (the engine's purge comes before M83)
     e_pos = 0.0             # running extruder position in both modes, reset by G92 E
     printing = False
+    bed_target = 0.0        # last M140 / M190 S value before the first feature
+    feature = ""            # name of the current "; FEATURE:" section
     modal_ok = True         # False once a plane change, offset or modal G code has been seen before printing
 
     def bad(what, n):
         raise SliceError(500, "slice check failed: %s (line %d)" % (what, n))
 
     for n, ln in enumerate(lines, 1):
-        if not printing and ln.startswith("; FEATURE:"):
-            printing = True
+        if ln.startswith("; FEATURE:"):
+            feature = ln[len("; FEATURE:"):].strip()
+            if not printing:
+                if bed_target <= 0:
+                    raise SliceError(500, "slice check failed: bed temperature is 0 for this plate "
+                                          "(no bed-heat command before printing starts)")
+                printing = True
             continue
         text = ln.split(";", 1)[0].strip().upper()
         head = _HEAD.match(text) if text else None
@@ -252,6 +270,9 @@ def _check_moves(lines):
             modal_ok = False
             continue
         if kind == "M":
+            if code in (140, 190) and not printing:
+                sm = re.search(r"S\s*([+-]?(?:\d+\.?\d*|\.\d+))", text[head.end():])
+                bed_target = float(sm.group(1)) if sm else bed_target
             if code == 82:
                 e_mode = "abs"
             elif code == 83:
@@ -307,6 +328,9 @@ def _check_moves(lines):
             for px, py in points:
                 if not (0 <= px <= BED_MM and 0 <= py <= BED_MM):
                     bad("extruding move outside the bed (X%.1f Y%.1f)" % (px, py), n)
+                # the engine's own purge line (feature Custom) runs through this corner; nothing else may
+                if feature != "Custom" and px < EXCLUDED_CORNER[0] and py < EXCLUDED_CORNER[1]:
+                    bad("extruding move in the excluded bed corner (X%.1f Y%.1f)" % (px, py), n)
         x, y = nx, ny
     if not printing:
         raise SliceError(500, "slice check failed: no print moves found")
@@ -330,7 +354,7 @@ def check_gcode(gcode, settings):
         fail("printer_model", cfg["printer_model"], "Bambu Lab P1S")
     if not need("nozzle_diameter").startswith("0.4"):
         fail("nozzle_diameter", cfg["nozzle_diameter"], "0.4")
-    if settings["filament"] not in need("filament_settings_id"):
+    if need("filament_settings_id") != settings["filament"]:
         fail("filament_settings_id", cfg["filament_settings_id"], settings["filament"])
     if need("print_settings_id") != settings["process"]:
         fail("print_settings_id", cfg["print_settings_id"], settings["process"])
@@ -338,6 +362,16 @@ def check_gcode(gcode, settings):
         fail("curr_bed_type", cfg["curr_bed_type"], settings["options"]["curr_bed_type"])
     if need("enable_support") != settings["options"]["enable_support"]:
         fail("enable_support", cfg["enable_support"], settings["options"]["enable_support"])
+
+    temp_key = BED_TEMP_KEYS[settings["options"]["curr_bed_type"]]
+    for key in (temp_key, temp_key + "_initial_layer"):
+        raw = need(key)
+        try:
+            hot = float(raw) > 0
+        except ValueError:
+            hot = False
+        if not hot:
+            raise SliceError(500, "slice check failed: bed temperature is 0 for this plate (%s = %s)" % (key, raw[:20]))
 
     _check_moves(lines)
 
@@ -356,6 +390,18 @@ def _remove(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def _engine_failure(output, choice):
+    """The SliceError for an engine run that failed. The raw engine text goes to the log, not to the person."""
+    log.warning("slicer failed: %s", output[-4000:])
+    if "floating regions" in output:
+        if ((choice or {}).get("supports") or "off") == "off":
+            return SliceError(400, "This model has overhanging parts that would print in mid-air. Turn on Tree "
+                                   "supports, cut a flat base, or delete loose pieces, then slice again.")
+        return SliceError(400, "The slicer could not support this model's overhanging parts. Cut a flat base or "
+                               "delete loose pieces, then slice again.")
+    return SliceError(500, "slicer failed: " + output[-ENGINE_TAIL:])
 
 
 def run_slice(stl, choice, workdir, timeout=TIMEOUT_S):
@@ -390,11 +436,13 @@ def run_slice(stl, choice, workdir, timeout=TIMEOUT_S):
                     pass
                 break
         if proc.returncode != 0 or (result is not None and not result.get("ok")):
-            raise SliceError(500, "slicer failed: " + output[-ENGINE_TAIL:])
+            raise _engine_failure(output, choice)
         if not os.path.exists(out):
             raise SliceError(500, "slicer produced no file: " + output[-ENGINE_TAIL:])
         try:
             with zipfile.ZipFile(out) as z:
+                if [n for n in z.namelist() if n.endswith(".gcode")] != [GCODE_ENTRY]:
+                    raise SliceError(500, "unexpected print data in the file")
                 gcode = z.read(GCODE_ENTRY).decode("utf-8", "replace")
         except (zipfile.BadZipFile, KeyError) as e:
             raise SliceError(500, "slicer output is not a print file (%s)" % e)

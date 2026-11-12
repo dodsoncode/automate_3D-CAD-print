@@ -568,10 +568,16 @@ def test_slice_happy_path(client, slicer):
 
 
 def test_slice_passes_choice_to_slicer(client, slicer):
-    start_and_finish(client, filament="petg_hf", quality="fine", plate="cool", supports="tree")
+    start_and_finish(client, filament="petg_hf", quality="fine", plate="smooth_pei", supports="tree")
     stl, choice = slicer.calls[0]
     assert stl == STL
-    assert choice == {"filament": "petg_hf", "quality": "fine", "plate": "cool", "supports": "tree"}
+    assert choice == {"filament": "petg_hf", "quality": "fine", "plate": "smooth_pei", "supports": "tree"}
+
+
+def test_incompatible_filament_and_plate_is_a_400_before_queueing(client, slicer):
+    r = slice_post(client, filament="petg_hf", plate="cool")
+    assert r.status_code == 400 and "cannot be printed on the Cool Plate" in r.json()["detail"]
+    assert server._jobs == {} and slicer.calls == []
 
 
 def test_slice_choice_defaults_are_left_out(client, slicer):
