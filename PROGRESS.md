@@ -324,3 +324,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Substep: review of the page panel found no critical or important issues: the panel stays hidden and silent outside the Render version, the screen stays awake while slicing, a result is discarded if the model is edited or replaced mid-slice, and polling cannot double up.
 - Left for the final review to triage (minor): changing a setting after a slice still shows the old file's Download button; a resumed job can be shown against a newly opened model; a wrong passcode during polling drops a finished job; no timeout on status requests.
 - NEXT: Task 4 (deploy wiring, printing guide, one real slice through the real server).
+
+### 2026-11-12 - P1S slicing Task 4: deploy wiring, docs, real end-to-end run
+- Step 1 - real end-to-end run: new script `image3d/tests/e2e_slice.py` (not collected by pytest; 0 e2e items in `pytest --collect-only`). It starts uvicorn for `server:app` on a free port with `IMAGE3D_PASSCODE` set and no `HF_TOKEN`, checks `/api/slice/options` says available, POSTs a model with `pla_silk_plus` / `fine` / `textured_pei` / `tree`, polls until done, downloads the file, checks it is a zip with `Metadata/plate_1.gcode`, and re-runs `slicing.check_gcode` with the matching settings. Real OrcaSlicer engine, Claude's workspace (2 CPU cores, so NOT comparable with Render's 0.1 CPU).
+  - (a) `tests/samples/two_cubes.stl` (24 triangles): done in 2.0 s wall (POST to done), 0.1 MB file, 16m 36s print time, 4.38 g, 125 layers; check passed.
+  - (b) generated bumpy sphere, 124,500 triangles, about 71 x 72 x 72 mm: done in 15.6 s wall, 3.1 MB file, 1h 32m 18s print time, 52.52 g, 447 layers; check passed.
+  - (c) `python image3d/tests/e2e_slice.py --direct` (`slicing.run_slice` on the same heavy model, measured with `resource.getrusage`): 14.0 s wall, peak RSS 368 MB for the node engine process, 98 MB for the Python process that called it (it holds the parsed model). Together that is about 466 MB, close to Render's 512 MB limit before the web server's own memory is counted (not measured on Render).
+  - No bug found in Tasks 1-3 code.
