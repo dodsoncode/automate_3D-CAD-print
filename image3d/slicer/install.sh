@@ -10,9 +10,14 @@ ORCA_COMMIT="47a17ad9a33af7871bdbf21935bc2c1a6a5e488f"   # profiles pinned to th
 
 SLICER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="$SLICER_DIR/resources/profiles"
-TMP=""
+NODE_TMP=""
+PROFILES_TMP=""
 
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
+cleanup() {
+  [ -n "$NODE_TMP" ] && rm -rf "$NODE_TMP"
+  [ -n "$PROFILES_TMP" ] && rm -rf "$PROFILES_TMP"
+  return 0
+}
 trap cleanup EXIT
 
 fail() {
@@ -27,13 +32,16 @@ step_node() {
   fi
   local name="node-$NODE_VERSION-linux-x64"
   local base="https://nodejs.org/dist/$NODE_VERSION"
-  TMP="$(mktemp -d)" || return 1
-  curl -fsSL "$base/$name.tar.xz" -o "$TMP/$name.tar.xz" || return 1
-  curl -fsSL "$base/SHASUMS256.txt" -o "$TMP/SHASUMS256.txt" || return 1
-  (cd "$TMP" && grep " $name.tar.xz\$" SHASUMS256.txt | sha256sum -c - >/dev/null 2>&1) || return 1
-  mkdir -p "$SLICER_DIR/.node" || return 1
-  tar -xJf "$TMP/$name.tar.xz" -C "$SLICER_DIR/.node" --strip-components=1 || return 1
-  [ -x "$SLICER_DIR/.node/bin/node" ] || return 1
+  # Work inside slicer/ so the final mv is a same-filesystem rename: an interrupted run never leaves a half-made .node
+  NODE_TMP="$(mktemp -d "$SLICER_DIR/.node.tmp.XXXXXX")" || return 1
+  curl -fsSL "$base/$name.tar.xz" -o "$NODE_TMP/$name.tar.xz" || return 1
+  curl -fsSL "$base/SHASUMS256.txt" -o "$NODE_TMP/SHASUMS256.txt" || return 1
+  (cd "$NODE_TMP" && grep " $name.tar.xz\$" SHASUMS256.txt | sha256sum -c - >/dev/null 2>&1) || return 1
+  mkdir "$NODE_TMP/extract" || return 1
+  tar -xJf "$NODE_TMP/$name.tar.xz" -C "$NODE_TMP/extract" --strip-components=1 || return 1
+  [ -x "$NODE_TMP/extract/bin/node" ] || return 1
+  rm -rf "$SLICER_DIR/.node" || return 1
+  mv "$NODE_TMP/extract" "$SLICER_DIR/.node" || return 1
 }
 
 # ---- step 2: the engine from npm ----
@@ -51,18 +59,18 @@ step_profiles() {
   if [ -f "$PROFILES_DIR/BBL.json" ] && [ -d "$PROFILES_DIR/BBL" ]; then
     return 0
   fi
-  TMP="$(mktemp -d)" || return 1
-  local repo="$TMP/repo"
+  PROFILES_TMP="$(mktemp -d)" || return 1
+  local repo="$PROFILES_TMP/repo"
   git clone --quiet --depth 1 --filter=blob:none --sparse "$ORCA_REPO" "$repo" || return 1
   git -C "$repo" sparse-checkout set resources/profiles/BBL || return 1
   git -C "$repo" fetch --quiet --depth 1 --filter=blob:none origin "$ORCA_COMMIT" || return 1
   git -C "$repo" checkout --quiet FETCH_HEAD || return 1
-  git -C "$repo" show "FETCH_HEAD:resources/profiles/BBL.json" > "$TMP/BBL.json" || return 1
-  [ -s "$TMP/BBL.json" ] && [ -d "$repo/resources/profiles/BBL" ] || return 1
+  git -C "$repo" show "FETCH_HEAD:resources/profiles/BBL.json" > "$PROFILES_TMP/BBL.json" || return 1
+  [ -s "$PROFILES_TMP/BBL.json" ] && [ -d "$repo/resources/profiles/BBL" ] || return 1
   rm -rf "$PROFILES_DIR" || return 1
   mkdir -p "$PROFILES_DIR" || return 1
   cp -r "$repo/resources/profiles/BBL" "$PROFILES_DIR/BBL" || return 1
-  cp "$TMP/BBL.json" "$PROFILES_DIR/BBL.json" || return 1
+  cp "$PROFILES_TMP/BBL.json" "$PROFILES_DIR/BBL.json" || return 1
 }
 
 step_node || fail node

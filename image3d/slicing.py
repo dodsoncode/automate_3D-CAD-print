@@ -9,6 +9,7 @@ import math
 import os
 import re
 import struct
+import shutil
 import subprocess
 import zipfile
 
@@ -98,6 +99,9 @@ def prepare_stl(data):
     if n > MAX_TRIANGLES:
         raise SliceError(413, "model has %d triangles; the limit is %d" % (n, MAX_TRIANGLES))
     rows = list(struct.iter_unpack("<12fH", memoryview(data)[84:84 + 50 * n]))
+    # NaN never wins a min/max comparison, so every vertex is tested (the sum is non-finite if any coordinate is)
+    if not all(math.isfinite(sum(r[3:12])) for r in rows):
+        raise SliceError(400, "the STL contains invalid coordinates")
     lo, hi = [math.inf] * 3, [-math.inf] * 3
     for r in rows:
         for v in (3, 6, 9):
@@ -107,8 +111,6 @@ def prepare_stl(data):
                     lo[a] = c
                 if c > hi[a]:
                     hi[a] = c
-    if not all(math.isfinite(c) for c in lo + hi):
-        raise SliceError(400, "the STL contains invalid coordinates")
     size = [hi[a] - lo[a] for a in range(3)]
     if max(size) > BED_MM:
         raise SliceError(400, "model is %.0f x %.0f x %.0f mm and does not fit the %d mm bed" % (*size, BED_MM))
@@ -150,7 +152,8 @@ def _labels(choice):
 
 # ---------- G-code check ----------
 _CONFIG = re.compile(r"^; (\w+) = (.*)$")
-_WORD = re.compile(r"([A-Za-z])(-?\d*\.?\d+)")
+_HEAD = re.compile(r"(?:N\d+\s*)?([GM])\s*0*(\d+)(\.\d+)?")
+_WORD = re.compile(r"\s*([A-Z])\s*([+-]?(?:\d+\.?\d*|\.\d+))?")
 
 
 def _config(lines):
@@ -164,6 +167,101 @@ def _config(lines):
         if m and m.group(1) not in cfg:
             cfg[m.group(1)] = m.group(2).strip().strip('"')
     return cfg
+
+
+def _words(text, n):
+    """'X10 y-5.5 E+1' -> {"X": 10.0, "Y": -5.5, "E": 1.0}. Anything unreadable in a move line -> SliceError."""
+    out, pos = {}, 0
+    while pos < len(text):
+        m = _WORD.match(text, pos)
+        if not m or m.end() == pos or (m.group(2) is None and m.group(1) in "XYEIJR"):
+            raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
+        if m.group(2) is not None:
+            out[m.group(1)] = float(m.group(2))
+        pos = m.end()
+    return out
+
+
+def _arc_extremes(x, y, nx, ny, cx, cy, ccw):
+    """Left/right/top/bottom-most points an arc from (x, y) to (nx, ny) around (cx, cy) really sweeps through
+    (G3 = counter-clockwise, G2 = clockwise; start = end means a full circle)."""
+    r = max(math.hypot(x - cx, y - cy), math.hypot(nx - cx, ny - cy))
+    a0, a1 = math.atan2(y - cy, x - cx), math.atan2(ny - cy, nx - cx)
+    full = abs(nx - x) < 1e-6 and abs(ny - y) < 1e-6
+    sweep = 2 * math.pi if full else ((a1 - a0) if ccw else (a0 - a1)) % (2 * math.pi)
+    out = []
+    for k, (dx, dy) in enumerate(((1, 0), (0, 1), (-1, 0), (0, -1))):
+        t = k * math.pi / 2
+        if ((t - a0) if ccw else (a0 - t)) % (2 * math.pi) <= sweep:
+            out.append((cx + r * dx, cy + r * dy))
+    return out
+
+
+def _check_moves(lines):
+    """Walks the whole G-code keeping the X/Y position, G90/G91 and the extruder mode. From the first '; FEATURE:'
+    line on, every extruding move must stay inside the bed: the start and end of a line, and for an arc the whole
+    part of the circle it sweeps (the start sequence before that legitimately parks and purges near the edges)."""
+    x = y = None            # unknown until a move or G92 sets them; G28 forgets them
+    rel_xy = False          # G91
+    rel_e = False           # M83 (G91 makes E relative too); the firmware starts in absolute mode
+    last_e = 0.0            # absolute extruder position (M82), reset by G92 E
+    printing = False
+    for n, ln in enumerate(lines, 1):
+        if not printing and ln.startswith("; FEATURE:"):
+            printing = True
+            continue
+        text = ln.split(";", 1)[0].strip().upper()
+        head = _HEAD.match(text) if text else None
+        if not head:
+            continue
+        kind, code = head.group(1), int(head.group(2))
+        if kind == "M":
+            if code == 82:
+                rel_e = False
+            elif code == 83:
+                rel_e = True
+            continue
+        if code == 90 or code == 91:
+            rel_xy = code == 91
+            continue
+        if code == 28:
+            x = y = None
+            continue
+        if code not in (0, 1, 2, 3, 92):
+            continue
+        if head.group(3) and code != 92:
+            raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
+        w = _words(text[head.end():], n)
+        if code == 92:   # set position
+            x = w.get("X", x)
+            y = w.get("Y", y)
+            last_e = w.get("E", last_e)
+            continue
+        nx, ny = x, y
+        if "X" in w:
+            nx = w["X"] if not rel_xy else (x + w["X"] if x is not None else None)
+        if "Y" in w:
+            ny = w["Y"] if not rel_xy else (y + w["Y"] if y is not None else None)
+        extruding = False
+        if "E" in w:
+            if rel_e or rel_xy:
+                extruding = w["E"] > 0
+            else:
+                extruding = w["E"] > last_e
+                last_e = w["E"]
+        if printing and extruding:
+            if x is None or y is None:
+                raise SliceError(500, "slice check failed: extruding move from an unknown position (line %d)" % n)
+            points = [(x, y), (nx, ny)]
+            if code in (2, 3):
+                if "I" not in w and "J" not in w:
+                    raise SliceError(500, "slice check failed: arc cannot be bounded (line %d)" % n)
+                points += _arc_extremes(x, y, nx, ny, x + w.get("I", 0.0), y + w.get("J", 0.0), code == 3)
+            for px, py in points:
+                if not (0 <= px <= BED_MM and 0 <= py <= BED_MM):
+                    raise SliceError(500, "slice check failed: extruding move outside the bed (X%.1f Y%.1f, line %d)"
+                                     % (px, py, n))
+        x, y = nx, ny
 
 
 def check_gcode(gcode, settings):
@@ -193,21 +291,7 @@ def check_gcode(gcode, settings):
     if need("enable_support") != settings["options"]["enable_support"]:
         fail("enable_support", cfg["enable_support"], settings["options"]["enable_support"])
 
-    printing = False
-    for n, ln in enumerate(lines, 1):
-        if not printing:
-            printing = ln.startswith("; FEATURE:")
-            continue
-        if not ln.startswith(("G1 ", "G2 ", "G3 ")):  # the engine also writes arcs (G2/G3)
-            continue
-        words = {}
-        for letter, value in _WORD.findall(ln.split(";", 1)[0]):
-            words.setdefault(letter.upper(), float(value))
-        if words.get("E", 0) > 0:
-            for axis in "XY":
-                if axis in words and not 0 <= words[axis] <= BED_MM:
-                    raise SliceError(500, "slice check failed: extruding move outside the bed (%s%.1f, line %d)"
-                                     % (axis, words[axis], n))
+    _check_moves(lines)
 
     time_m = re.search(r"^; model printing time: [^;\n]*; total estimated time: ([^\n]+)$", gcode, re.M)
     grams_m = re.search(r"^; filament used \[g\] = (-?\d+\.?\d*)", gcode, re.M)
@@ -273,3 +357,5 @@ def run_slice(stl, choice, workdir, timeout=TIMEOUT_S):
     except BaseException:
         _remove(out)
         raise
+    finally:
+        shutil.rmtree(os.path.join(SLICER_DIR, ".orcaslicercli"), ignore_errors=True)  # engine scratch files

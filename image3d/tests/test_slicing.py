@@ -50,6 +50,15 @@ def test_prepare_centres_model():
     assert info["size_mm"] == pytest.approx([20, 20, 20])
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_prepare_rejects_non_finite_coordinates(bad):
+    tris = box_tris(20, 20, 20, -10, -10, 0)
+    tris[3] = ((bad, tris[3][0][1], tris[3][0][2]),) + tris[3][1:]
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.prepare_stl(stl_bytes(tris))
+    assert e.value.status == 400
+
+
 def test_prepare_rejects():
     cube = stl_bytes(box_tris(20, 20, 20, 0, 0, 0))
     big = b"\0" * 80 + struct.pack("<I", slicing.MAX_TRIANGLES + 1) + b"\0" * (50 * (slicing.MAX_TRIANGLES + 1))
@@ -106,7 +115,7 @@ def test_options_tables():
 def gcode(printer="Bambu Lab P1S", nozzle="0.4", filament="Bambu PLA Basic @BBL P1S 0.4 nozzle",
           process="0.20mm Standard @BBL X1C", plate="Textured PEI Plate", support="0", body=None):
     if body is None:
-        body = "G1 X120 Y130 E0.5 F1800\nG1 X121.5 Y130 E0.7"
+        body = "M83\nG1 X120 Y130 E0.5 F1800\nG1 X121.5 Y130 E0.7"
     return "\n".join([
         "; HEADER_BLOCK_START",
         "; model printing time: 1h 23m 58s; total estimated time: 1h 28m 39s",
@@ -122,6 +131,7 @@ def gcode(printer="Bambu Lab P1S", nozzle="0.4", filament="Bambu PLA Basic @BBL 
         "; machine_start_gcode = " + "G28 ; home\\n" * 400,
         "; CONFIG_BLOCK_END",
         "G1 X-10 Y-5 E0.1 F900",                      # start-up purge before the first feature
+        "G1 X110 Y110 F3000",
         "; FEATURE: Outer wall",
         body,
         "; filament used [g] = 51.14",
@@ -162,7 +172,73 @@ def test_check_gcode_rejects_setting_mismatch(kwargs, choice, word):
 
 
 def test_check_gcode_ignores_travel_and_start_moves():
-    body = "G1 X-10 F9000\nG1 X300 Y300 E0 F9000\nG1 X-4 Y-4 E-0.8\nG1 X120 Y120 E0.4"
+    body = "M83\nG1 X-10 F9000\nG1 X300 Y300 E0 F9000\nG1 X-4 Y-4 E-0.8\nG1 X120 Y120 F9000\nG1 X121 Y120 E0.4"
+    assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
+
+
+MOVE_REJECTS = [
+    # position is inherited from earlier moves
+    "G1 X300 Y10 F9000\nG1 Y50 E1",
+    "G1 X10 Y300 F9000\nG1 X50 E1",
+    # arcs: the path bulges off the bed although the endpoint is on it; full circle without an endpoint
+    "G1 X30 Y100 F9000\nG2 X10 Y120 I-20 J0 E1",     # clockwise 270 degrees round the left side
+    "G1 X30 Y100 F9000\nG3 X10 Y80 I-20 J0 E1",      # counter-clockwise 270 degrees round the left side
+    "G1 X100 Y100 F9000\nG2 I-400 J0 E1",
+    "G1 X100 Y100 F9000\nG2 X110 Y100 R5 E1",     # R form cannot be bounded
+    "G1 X100 Y100 F9000\nG2 X110 Y100 E1",        # no I/J at all
+    # relative positioning
+    "G1 X1 Y100 F9000\nG91\nG1 X-2 E1\nG90",
+    "G28\nG91\nG1 X5 E1",                         # position unknown
+    "G28\nG1 Y50 E1",                              # position unknown after homing
+    # spellings
+    "G1 X10 Y10 F9000\ng1 x-5 y5 e1",
+    "G1 X10 Y10 F9000\nG01 X-5 Y5 E1",
+    "G1 X10 Y10 F9000\nG1\tX-5 E1",
+    "G1 X10 Y10 F9000\nG1X-5 E1",
+    "G1 X10 Y10 F9000\nG1 X-5 E+1",
+    "G1 X10 Y10 F9000\nG1 X+300 E1",
+    "G1 X10 Y10 F9000\nG1 Xnan E1",
+    "G1 X10 Y10 F9000\nG1 X5 E1 *71",              # junk the parser cannot read
+    # extruder modes
+    "M82\nG92 E-5\nG1 X-5 Y5 E-3",                # absolute E, negative but advancing
+    "G1 X300 Y10 E5",                               # mode never declared (the firmware default is absolute)
+    "M82\nG92 E0\nG1 X300 Y10 E5",
+    "M83\nG1 X-5 Y5 E1",
+]
+
+
+@pytest.mark.parametrize("body", MOVE_REJECTS)
+def test_check_gcode_rejects_unsafe_moves(body):
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(body=body), slicing.settings_for({}))
+    assert e.value.status == 500
+
+
+def test_check_gcode_move_messages():
+    def msg(body):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.check_gcode(gcode(body=body), slicing.settings_for({}))
+        return str(e.value)
+    assert "unreadable move" in msg("G1 X10 Y10 F9000\nG1 Xnan E1")
+    assert "arc cannot be bounded" in msg("G1 X100 Y100 F9000\nG2 X110 Y100 R5 E1")
+    assert "outside the bed" in msg("G1 X30 Y100 F9000\nG2 X10 Y120 I-20 J0 E1")
+
+
+MOVE_ACCEPTS = [
+    "G1 X100 Y100 F9000\nG2 X110 Y110 I10 J0 E1",                          # on-bed arc
+    "G1 X30 Y100 F9000\nG3 X10 Y120 I-20 J0 E1",                           # quarter arc that stays on the bed
+    "G1 X10 Y100 F9000\nG2 X30 Y100 I10 J0 E1",                            # half circle over the top, centre on bed
+    "M83\nG1 X-20 Y50 F9000\nG1 X100 Y100 F9000\nG1 X120 Y100 E1",        # travel off the bed, back, then print
+    "M82\nG92 E0\nG1 X120 Y120 E1\nG1 X121 Y120 E0.5\nG1 X122 Y120 E1.2",  # absolute E with a retract
+    "M82\nG92 E10\nG1 X-5 Y5 E8",                                          # absolute E going backwards = retract
+    "M83\nG1 X-5 Y5 E-0.8\nG1 X-5 Y5 E0",                                  # relative retract off the bed
+    "G91\nG1 X5 Y5 E1\nG90\nG1 X100 Y100 E2",                             # small relative step on the bed
+    "G28\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",                            # homed, then positioned
+]
+
+
+@pytest.mark.parametrize("body", MOVE_ACCEPTS)
+def test_check_gcode_accepts_safe_moves(body):
     assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
 
 
@@ -211,6 +287,16 @@ def test_run_slice_deletes_output_when_check_fails(monkeypatch, tmp_path):
         slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
     assert "nozzle_diameter" in str(e.value)
     assert not os.path.exists(tmp_path / "model.gcode.3mf")
+
+
+def test_run_slice_cleans_engine_scratch_folder(monkeypatch, tmp_path):
+    slicer = tmp_path / "slicer"
+    (slicer / ".orcaslicercli" / "tmp").mkdir(parents=True)
+    monkeypatch.setattr(slicing, "SLICER_DIR", str(slicer))
+    fake_run(monkeypatch, subprocess.CompletedProcess([], 1, stdout="", stderr="x"))
+    with pytest.raises(slicing.SliceError):
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    assert not (slicer / ".orcaslicercli").exists()
 
 
 def test_run_slice_success_summary(monkeypatch, tmp_path):
