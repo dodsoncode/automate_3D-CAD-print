@@ -8,7 +8,8 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor) is built and desktop-tested; the editor is published as a claude.ai artifact. Waiting on Jacob for TI6 (try the artifact editor on the phone) and TI7 (Hugging Face token + Render deploy, first real test of generation)
+- **Slice for P1S (branch `slice-send`, PR not yet opened):** built and tested here (slicer core script-checked with the real engine; server and page with a fake slicer; real end-to-end runs through the real server). Not verified: the slicer on Render, a real phone, any print
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor) is built and desktop-tested; the editor is published as a claude.ai artifact. TI6 and TI7 are done (Jacob reported the Render deploy and phone editor working on 2026-11-12). After the Slice for P1S PR is merged Jacob does TS4 (redeploy, check the slicer is available) and TS5 (first small watched print)
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -331,3 +332,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
   - (b) generated bumpy sphere, 124,500 triangles, about 71 x 72 x 72 mm: done in 15.6 s wall, 3.1 MB file, 1h 32m 18s print time, 52.52 g, 447 layers; check passed.
   - (c) `python image3d/tests/e2e_slice.py --direct` (`slicing.run_slice` on the same heavy model, measured with `resource.getrusage`): 14.0 s wall, peak RSS 368 MB for the node engine process, 98 MB for the Python process that called it (it holds the parsed model). Together that is about 466 MB, close to Render's 512 MB limit before the web server's own memory is counted (not measured on Render).
   - No bug found in Tasks 1-3 code.
+- Step 2 - full test run: `python -m pytest -q image3d/tests gui/tests` -> 267 passed; `(cd firmware && python -m pytest -q)` -> 39 passed. The e2e script is not collected.
+- Step 3 - docs and deploy wiring: `render.yaml` build command is now `pip install -r requirements.txt && bash slicer/install.sh` (nothing else changed); new `image3d/PRINTING.md`; `image3d/DEPLOY.md` section "Updating to get the slicer"; `image3d/README.md`, root `README.md`, `image3d/PROGRESS.md` (steps 17-21) and `TASKS.md` (TS4, TS5 added; TS3 stays open) updated; "Current status" refreshed.
+- DONE: deploy wiring, docs, real end-to-end run. Verification level: slicer core script-checked with the real engine in Claude's workspace; server tested with a fake slicer plus the real end-to-end runs above; page tested in a desktop browser at phone size with a fake slicer. NOT verified: the slicer on Render (install step, memory, time), a real phone, any print. Concern: engine peak 368 MB plus the Python process (98 MB in the direct run) is close to Render's 512 MB for a 124,500-triangle model; a 150,000-triangle model is a bit more.
+- NEXT: controller pushes and opens the PR. Jacob after merge: TS4 (redeploy, check `SLICER INSTALL: ok` and `/api/slice/options`), TS5 (first small watched print), optionally TS3.
+- BLOCKED: nothing.

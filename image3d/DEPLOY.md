@@ -21,6 +21,14 @@ Status: the Hugging Face call was run for real on 2026-11-11 from Claude's works
 2. The Generate from a photo box shows up when the server is awake. Choose a photo, type the passcode (the page remembers it on this phone), tap Generate.
 3. Wait a minute or two. The model opens in the editor; then delete pieces, resize, cut and export the STL as usual.
 
+## Updating to get the slicer
+The "Slice for P1S" section comes with a new build step (`bash slicer/install.sh`, added to the build command in `render.yaml`). To get it after the PR is merged:
+1. Render redeploys from `main` by itself if the Blueprint is linked and auto-deploy is on. Otherwise open the service in Render and tap Manual Deploy, then Deploy latest commit.
+2. When the deploy is Live, open the Logs tab and look in the build log for the line `SLICER INSTALL: ok`.
+3. In the phone browser open `<service URL>/api/slice/options`. It should show `"available": true`. Then reload the page: the Slice for P1S section appears below Export.
+4. If it shows `"available": false` (or the build log says `SLICER INSTALL: failed at ...`), the rest of the app still works: the install step cannot fail the deploy. Send Claude the build-log lines around `SLICER INSTALL`.
+5. Expect a slice to take about 3 minutes on the free instance (an estimate from CPU-seconds measured elsewhere, not measured on Render). Models are limited to 150,000 triangles. Steps for getting the file onto the printer are in [PRINTING.md](PRINTING.md).
+
 ## Troubleshooting
 - First load takes about a minute: the free Render instance sleeps when idle and has to wake up. Reload after a minute.
 - Message mentions quota: the daily free GPU time on Hugging Face is used up. Try again later (it resets daily).
