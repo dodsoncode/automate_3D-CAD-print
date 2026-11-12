@@ -193,3 +193,57 @@ console.log(JSON.stringify({a:a,nz:nz,hdr:String.fromCharCode.apply(null,b.subar
     assert o["a"] == [0, 0, 0, 1, 0, 0, 0, 1, 0]
     assert o["cnt"] == 12 and o["hdr"] == "image3d"
     assert all(abs(sum(c * c for c in n) - 1) < 1e-6 for n in o["nz"])
+
+
+def test_cut_through_pinch_vertex_stays_closed():
+    # two pyramids touching apex-to-apex at (0,0,5): the z=5 cross-section is a bow-tie (two triangles sharing
+    # one vertex). Real generated meshes have such pinch points; each lobe must get its own cap.
+    r = node("""
+function pyr(sx){const A=[0,0,5],b=[[sx*10,-5,0],[sx*10,5,0],[sx*10,5,10],[sx*10,-5,10]],o=sx<0,t=[];
+  for(let i=0;i<4;i++){const p=b[i],q=b[(i+1)%4];t.push(o?[A,p,q]:[A,q,p]);}
+  t.push(o?[b[0],b[2],b[1]]:[b[0],b[1],b[2]]);t.push(o?[b[0],b[3],b[2]]:[b[0],b[2],b[3]]);return t.flat(2);}
+const sh=mesh.weld(pyr(1).concat(pyr(-1)));const out={inClosed:mesh.isClosed(sh),inVol:mesh.volume(sh)};
+for(const keep of ['below','above']){const c=mesh.cut([sh],'z',5,keep);
+  out[keep]={closed:c.every(mesh.isClosed),vol:c.reduce((s,x)=>s+mesh.volume(x),0)};}
+for(const axis of ['x','y']){const c=mesh.cut([sh],axis,axis==='x'?4:1,'above');out[axis]=c.every(mesh.isClosed);}
+console.log(JSON.stringify(out));""")
+    assert r["inClosed"] and abs(r["inVol"] - 2000 / 3) < 1e-6
+    for keep in ("below", "above"):
+        assert r[keep]["closed"], keep
+        assert abs(r[keep]["vol"] - 1000 / 3) < 1e-6, keep
+    assert r["x"] and r["y"]
+
+
+def test_cut_caps_a_real_generated_cross_section():
+    # fixtures/real_section.json is the mid-height cross-section of a real Hunyuan3D-2 model: a 1496-point outline
+    # with a 1105-point cavity. Found on the first live run: the cap came out wrong and the cut part was not closed.
+    fx = json.dumps(os.path.join(HERE, "fixtures", "real_section.json"))
+    r = node("""
+const F=require(%s);
+function walls(loops){const v=[],t=[];loops.forEach(l=>{const o=v.length/3,n=l.length;l.forEach(p=>v.push(p[0],p[1],0));l.forEach(p=>v.push(p[0],p[1],10));
+  for(let i=0;i<n;i++){const j=(i+1)%%n;t.push(o+i,o+j,o+n+j, o+i,o+n+j,o+n+i);}});return {v,t};}
+function area(l){let s=0;for(let i=0;i<l.length;i++){const a=l[i],b=l[(i+1)%%l.length];s+=a[0]*b[1]-b[0]*a[1];}return s/2;}
+const sh=walls([F.outer].concat(F.holes)),want=area(F.outer)+F.holes.reduce((s,h)=>s+area(h),0),out={want:want};
+for(const keep of ['below','above']){let open=0,cap=0;
+  mesh.cut([sh],'z',5,keep).forEach(s=>{const e=new Map();for(let i=0;i<s.t.length;i+=3){const ids=[s.t[i],s.t[i+1],s.t[i+2]];
+    if(ids.every(k=>s.v[3*k+2]===5)){const q=ids.map(k=>[s.v[3*k],s.v[3*k+1]]);cap+=((q[1][0]-q[0][0])*(q[2][1]-q[0][1])-(q[1][1]-q[0][1])*(q[2][0]-q[0][0]))/2;}
+    for(let k=0;k<3;k++){const a=ids[k],b=ids[(k+1)%%3];if(s.v[3*a+2]===5&&s.v[3*b+2]===5){const key=Math.min(a,b)+'_'+Math.max(a,b);e.set(key,(e.get(key)||0)+1);}}}
+    for(const n of e.values()) if(n===1) open++;});
+  out[keep]={open:open,cap:Math.abs(cap)};}
+console.log(JSON.stringify(out));""" % fx)
+    assert r["want"] > 2000
+    for keep in ("below", "above"):
+        assert r[keep]["open"] == 0, keep          # every edge on the cut plane is shared by wall and cap
+        assert abs(r[keep]["cap"] - r["want"]) < 1e-6 * r["want"], keep   # the cap covers exactly outline minus cavity
+
+
+def test_cut_cap_fuzz_grid_holes_and_pinch_points():
+    # fuzz_cut.js: grid-aligned holes with exactly collinear points, and cross-sections that pinch to a point,
+    # each in random triangle order. Found by review after the first live run; every cut must leave no open edge
+    # on the cut plane and a cap of exactly the right area.
+    r = subprocess.run(["node", os.path.join(HERE, "fuzz_cut.js"), "3", "60"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(r.stdout)
+    assert set(rep) == {"gridHoles", "bowtie", "holeTouchesOutline", "holeTouchesHole", "collinearPinch"}
+    for name, s in rep.items():
+        assert s["runs"] == 120 and s["fails"] == 0, (name, s["first"])

@@ -2,15 +2,16 @@
 
 Everything done on the photo -> 3D -> STL tool, in order, with what was checked and what was not.
 The repo-wide log is [`../PROGRESS.md`](../PROGRESS.md); tasks are TI1-TI7 in [`../TASKS.md`](../TASKS.md).
-Times are US Central on 2026-11-11. Commits are on branch `image3d-tool`.
+Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-tool` (merged as PR #7); step 15 is on branch `image3d-real-mesh-fixes`.
 
 ## Where it stands
 
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
 - **Waiting on Jacob:** TI6 (try the editor on the phone) and TI7 (Hugging Face token + Render deploy).
-- **Not verified by anyone yet:** a real phone, the live Hugging Face call, the Render deploy, and the zip
-  download inside the real Claude app.
+- **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
+- **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
+  Claude app.
 
 ## What Jacob asked for
 
@@ -110,7 +111,25 @@ second **free Render** service next to the mental fitness app.
 ### Step 13 - PR (15:55)
 - Full run before pushing: `image3d/tests` + `gui/tests` 106 passed; `firmware` 39 passed.
 - The artifact was republished with the final page (wake lock, model size line, undo limit).
-- PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL". Not merged; waits for Jacob.
+- PR #7 opened against `main`: "Image3D: photo -> 3D model -> edit -> STL".
+
+### Step 14 - Merge (16:42)
+- Jacob asked for the merge; PR #7 merged to `main` (2bc9d21). The Render Blueprint can now use branch `main`.
+
+### Step 15 - First live generation and two fixes (16:50-18:00)
+- Jacob supplied a Hugging Face token. One real run of the generation call against the default Space worked
+  (valid model in about 10 seconds). This was run from Claude's workspace, not through Render.
+- Problem 1: the model had about 917,000 triangles. Fix: the server now asks the Space for a lighter model
+  (`HF_EXTRA_JSON`, default `{"octree_resolution": 128}`, about 115,000 triangles; measured live).
+- Problem 2: cutting the real model left it open. Cause: the hand-written cap triangulation failed on the real
+  cross-section (an outline with a cavity inside). Fix: caps now use the earcut library (vendored), and the
+  failing cross-section is kept as a test fixture.
+- A review of that fix then found three more ways a cap could come out open (points on exactly straight runs,
+  holes on a grid, cross-sections that pinch to a point). Fixed by nudging the coordinates given to earcut by
+  about one part in a billion and by testing loop nesting at a point no other loop shares. A fuzz test
+  (`tests/fuzz_cut.js`) now covers these: 9,000 random cuts, 0 failures.
+- Checked on real models: 168 cuts along all three axes on two models made from one test picture, all closed.
+  The page opened and cut a real model at phone size. Not yet checked: Render, a real phone, other pictures.
 
 ## What Jacob does next
 
@@ -118,8 +137,7 @@ second **free Render** service next to the mental fitness app.
    Hunyuan3D Space page in the phone browser, download the GLB, open it in the editor, delete a piece, set the
    size, export. Report anything that does not work.
 2. **TI7 - one-link generation (about 15 minutes):** follow [`DEPLOY.md`](DEPLOY.md): free Hugging Face token,
-   then Render > New > Blueprint > this repo, set `HF_TOKEN` and `IMAGE3D_PASSCODE`. This needs the PR merged
-   to `main` first (or point the Blueprint at branch `image3d-tool`).
+   then Render > New > Blueprint > this repo, set `HF_TOKEN` and `IMAGE3D_PASSCODE`. The PR is merged, so use branch `main`.
 3. Report the first real photo-to-model result. That is the first true test of generation.
 
 ## How to run the tests

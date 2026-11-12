@@ -85,6 +85,17 @@ def test_generate_space_busy(client, monkeypatch):
     assert "quota" in r.json()["detail"]
 
 
+def test_bad_extra_settings_is_a_configuration_error(client, monkeypatch):
+    # a broken HF_EXTRA_JSON is a setup mistake: 500 before the generator (or the Space) is touched, not a 503
+    ran = []
+    monkeypatch.setattr(server, "GENERATOR", lambda data, name: ran.append(1) or GLB)
+    monkeypatch.setenv("HF_EXTRA_JSON", "not json")
+    r = post(client)
+    assert r.status_code == 500
+    assert "server not configured" in r.json()["detail"] and "HF_EXTRA_JSON" in r.json()["detail"]
+    assert ran == []
+
+
 @pytest.mark.parametrize("var", ["IMAGE3D_PASSCODE", "HF_TOKEN"])
 def test_not_configured(client, monkeypatch, var):
     monkeypatch.delenv(var)
@@ -139,7 +150,7 @@ def _fake_gradio(monkeypatch, tmp_path, new_style):
     mod.Client, mod.handle_file = Client, lambda p: "FILE:" + os.path.basename(p)
     monkeypatch.setitem(sys.modules, "gradio_client", mod)
     monkeypatch.setenv("HF_TOKEN", "hf_fake")
-    for v in ("HF_API_NAME", "HF_SPACE", "HF_IMAGE_PARAM"):
+    for v in ("HF_API_NAME", "HF_SPACE", "HF_IMAGE_PARAM", "HF_EXTRA_JSON"):
         monkeypatch.delenv(v, raising=False)
     return calls
 
@@ -149,7 +160,7 @@ def test_generate_glb_with_fake_gradio_client(monkeypatch, tmp_path, new_style):
     calls = _fake_gradio(monkeypatch, tmp_path, new_style)
     assert server.generate_glb(PNG, "photo.png") == GLB
     assert calls == {"space": "tencent/Hunyuan3D-2", "token": "hf_fake", "api_name": "/shape_generation",
-                     "args": (), "kwargs": {"image": "FILE:photo.png"}, "timeout": 300}
+                     "args": (), "kwargs": {"image": "FILE:photo.png", "octree_resolution": 128}, "timeout": 300}
 
 
 def test_timeout_cancels_the_job_and_answers_503(client, monkeypatch, tmp_path):
@@ -169,6 +180,33 @@ def test_generate_glb_image_param_and_space_from_env(monkeypatch, tmp_path):
     server.generate_glb(PNG, "photo.jpg")
     assert calls["kwargs"] == {"input_image": "FILE:photo.jpg"}
     assert (calls["space"], calls["api_name"]) == ("someone/other", "/gen")
+
+
+def test_generate_glb_extra_settings_from_env(monkeypatch, tmp_path):
+    # HF_EXTRA_JSON adds keyword settings to the Space call; the default asks Hunyuan3D-2 for a lighter mesh
+    calls = _fake_gradio(monkeypatch, tmp_path, True)
+    monkeypatch.setenv("HF_EXTRA_JSON", '{"octree_resolution": 96, "steps": 20}')
+    server.generate_glb(PNG, "photo.png")
+    assert calls["kwargs"] == {"image": "FILE:photo.png", "octree_resolution": 96, "steps": 20}
+    monkeypatch.setenv("HF_EXTRA_JSON", "{}")
+    server.generate_glb(PNG, "photo.png")
+    assert calls["kwargs"] == {"image": "FILE:photo.png"}
+
+
+def test_generate_glb_no_default_extras_for_another_space(monkeypatch, tmp_path):
+    calls = _fake_gradio(monkeypatch, tmp_path, True)
+    monkeypatch.setenv("HF_SPACE", "someone/other")
+    monkeypatch.setenv("HF_API_NAME", "/gen")
+    server.generate_glb(PNG, "photo.png")
+    assert calls["kwargs"] == {"image": "FILE:photo.png"}
+
+
+@pytest.mark.parametrize("bad", ["not json", "[1, 2]", '{"image": "x"}'])
+def test_generate_glb_rejects_bad_extra_settings(monkeypatch, tmp_path, bad):
+    _fake_gradio(monkeypatch, tmp_path, True)
+    monkeypatch.setenv("HF_EXTRA_JSON", bad)
+    with pytest.raises(RuntimeError, match="HF_EXTRA_JSON"):
+        server.generate_glb(PNG, "photo.png")
 
 
 def test_generate_glb_empty_api_name_autopicks(monkeypatch, tmp_path):

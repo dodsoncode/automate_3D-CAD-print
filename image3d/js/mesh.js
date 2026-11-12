@@ -1,13 +1,14 @@
-/* Dependency-free mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut.
+/* Mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut.
+ * One dependency: earcut (vendor/earcut.min.js) for triangulating cut caps.
  *
  * A shell is {v: [x,y,z, ...], t: [i,j,k, ...]} with shared (welded) vertices and outward-facing CCW triangles
  * (same as gui/js/geom.js). A model is an array of shells. Every function is pure (returns new arrays).
  * Units: millimetres.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else { root.I3D = root.I3D || {}; root.I3D.mesh = factory(); }
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('../vendor/earcut.min.js'));
+  else { root.I3D = root.I3D || {}; root.I3D.mesh = factory(root.earcut); }
+})(typeof self !== 'undefined' ? self : this, function (earcut) {
   'use strict';
   var AXES = { x: 0, y: 1, z: 2 };
 
@@ -165,56 +166,6 @@
   }
 
   // ---------- cutting ----------
-  // cap triangulation: ear clipping in 2D. pos(id) -> [u,v]. polygon = array of vertex ids, CCW. Returns id triples.
-  function cross2(ax, ay, bx, by, cx, cy) { return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax); }
-
-  function earClip(ids, pos) {
-    var n = ids.length, tris = [], i;
-    if (n < 3) return tris;
-    var X = [], Y = [], prev = [], next = [], minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
-    for (i = 0; i < n; i++) {
-      var p = pos(ids[i]); X.push(p[0]); Y.push(p[1]); prev.push((i + n - 1) % n); next.push((i + 1) % n);
-      minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); miny = Math.min(miny, p[1]); maxy = Math.max(maxy, p[1]);
-    }
-    var ext = Math.max(maxx - minx, maxy - miny), dtol = 1e-12 * ext; // distance tolerance: anything closer than this to a line counts as on it
-    function cr(a, b, c) { return cross2(X[a], Y[a], X[b], Y[b], X[c], Y[c]); }
-    function same(a, b) { return X[a] === X[b] && Y[a] === Y[b]; }
-    function dist(a, b) { return Math.hypot(X[b] - X[a], Y[b] - Y[a]); }
-    // strictly convex corner, judged by the height of c above line a-b (not by area, which vanishes for fine loops)
-    function convex(a, b, c) { return cr(a, b, c) > dtol * dist(a, b); }
-    function isEar(a, b, c) {
-      var tab = dtol * dist(a, b), tbc = dtol * dist(b, c), tca = dtol * dist(c, a);
-      for (var m = next[c]; m !== a; m = next[m]) {
-        if (same(m, a) || same(m, b) || same(m, c)) continue; // bridge duplicates sit exactly on ear corners
-        // inside or on an edge (within float noise): a diagonal through a vertex would leave a T-junction
-        if (cr(a, b, m) >= -tab && cr(b, c, m) >= -tbc && cr(c, a, m) >= -tca) return false;
-      }
-      return true;
-    }
-    function clip(b, emit) {
-      var a = prev[b], c = next[b];
-      if (emit) tris.push([ids[a], ids[b], ids[c]]);
-      next[a] = c; prev[c] = a; return a;
-    }
-    var left = n, cur = 0;
-    while (left > 3) {
-      var found = -1, k = cur, tries = 0;
-      do {
-        if (convex(prev[k], k, next[k]) && isEar(prev[k], k, next[k])) { found = k; break; }
-        k = next[k]; tries++;
-      } while (tries < left);
-      if (found < 0) { // degenerate input: clip the most convex corner anyway, or drop a flat one
-        var bestK = -1, bestC = -Infinity;
-        k = cur;
-        for (tries = 0; tries < left; tries++, k = next[k]) { var cv = cr(prev[k], k, next[k]) / (dist(prev[k], k) || 1); if (cv > bestC) { bestC = cv; bestK = k; } }
-        cur = clip(bestK, bestC > dtol);
-      } else cur = clip(found, true);
-      left--;
-    }
-    if (left === 3 && convex(prev[cur], cur, next[cur])) tris.push([ids[prev[cur]], ids[cur], ids[next[cur]]]);
-    return tris;
-  }
-
   function pointInPoly(x, y, poly, pos) {
     var inside = false;
     for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -229,48 +180,50 @@
     return s / 2;
   }
 
-  // merge CW holes into a CCW outer polygon with zero-width bridges (Eberly), then ear-clip
+  // Cap triangulation: earcut (vendor/earcut.min.js) on a CCW outline with CW holes; pos(id) -> [u,v].
+  // Returns id triples, CCW. If earcut still skips a boundary point on a straight run, the walls use it anyway,
+  // so it is put back by splitting the cap triangle that spans it (no T-junctions).
   function triangulateWithHoles(outer, holes, pos) {
-    var poly = outer.slice();
-    var order = holes.map(function (h) {
-      var mi = 0; for (var i = 1; i < h.length; i++) if (pos(h[i])[0] > pos(h[mi])[0]) mi = i;
-      return { h: h, mi: mi };
-    }).sort(function (a, b) { return pos(b.h[b.mi])[0] - pos(a.h[a.mi])[0]; });
-    order.forEach(function (o) {
-      var h = o.h.slice(o.mi).concat(o.h.slice(0, o.mi)); // starts at the hole's rightmost vertex M
-      var M = pos(h[0]), mx = M[0], my = M[1], bestX = Infinity, pi = -1, i;
-      for (i = 0; i < poly.length; i++) { // nearest outer edge hit by a ray from M towards +u
-        var a = pos(poly[i]), b = pos(poly[(i + 1) % poly.length]);
-        if ((a[1] <= my && b[1] >= my) || (b[1] <= my && a[1] >= my)) {
-          if (a[1] === b[1]) continue;
-          var x = a[0] + (my - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
-          if (x >= mx && x < bestX) { bestX = x; pi = a[0] > b[0] ? i : (i + 1) % poly.length; }
-        }
-      }
-      if (pi < 0) pi = 0;
-      var P = pos(poly[pi]), I = [bestX, my];
-      // vertices inside triangle M-I-P block the bridge: take the one making the smallest angle with the ray
-      var bestCos = -Infinity;
-      if (isFinite(bestX)) for (i = 0; i < poly.length; i++) {
-        var q = pos(poly[i]);
-        if (i === pi || (q[0] === P[0] && q[1] === P[1])) continue;
-        var c1 = cross2(mx, my, I[0], I[1], q[0], q[1]), c2 = cross2(I[0], I[1], P[0], P[1], q[0], q[1]), c3 = cross2(P[0], P[1], mx, my, q[0], q[1]);
-        if (!((c1 >= 0 && c2 >= 0 && c3 >= 0) || (c1 <= 0 && c2 <= 0 && c3 <= 0))) continue;
-        var dist = Math.hypot(q[0] - mx, q[1] - my), cs = dist > 0 ? (q[0] - mx) / dist : -Infinity;
-        if (cs > bestCos) { bestCos = cs; pi = i; }
-      }
-      // earlier bridges leave several copies of the same point: use the copy whose corner faces M
-      var want = pos(poly[pi]), cn = poly.length;
-      for (i = 0; i < cn; i++) {
-        var pp = pos(poly[i]);
-        if (pp[0] !== want[0] || pp[1] !== want[1]) continue;
-        var pr = pos(poly[(i + cn - 1) % cn]), nx = pos(poly[(i + 1) % cn]);
-        var l1 = cross2(pr[0], pr[1], pp[0], pp[1], mx, my) > 0, l2 = cross2(pp[0], pp[1], nx[0], nx[1], mx, my) > 0;
-        if (cross2(pr[0], pr[1], pp[0], pp[1], nx[0], nx[1]) > 0 ? (l1 && l2) : (l1 || l2)) { pi = i; break; }
-      }
-      poly = poly.slice(0, pi + 1).concat(h, [h[0]], [poly[pi]], poly.slice(pi + 1));
+    var rings = [outer].concat(holes), ids = [], flat = [], holeIdx = [], start = [];
+    rings.forEach(function (r, ri) {
+      if (ri) holeIdx.push(ids.length);
+      start.push(ids.length);
+      r.forEach(function (id) { var p = pos(id); ids.push(id); flat.push(p[0], p[1]); });
     });
-    return earClip(poly, pos);
+    // earcut works on a copy nudged by about 1e-9 of the size (same point, same nudge): with no exactly straight
+    // runs or exact ties it keeps every boundary point and its hole bridges cannot land on an existing edge.
+    var ext = 0, i, nudged = new Array(flat.length);
+    for (i = 0; i < flat.length; i++) ext = Math.max(ext, Math.abs(flat[i]));
+    function hash(x, y) { var h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return h - Math.floor(h) - 0.5; }
+    for (i = 0; i < flat.length; i += 2) {
+      nudged[i] = flat[i] + 1e-9 * ext * hash(flat[i], flat[i + 1]);
+      nudged[i + 1] = flat[i + 1] + 1e-9 * ext * hash(flat[i + 1], flat[i]);
+    }
+    var raw = earcut(nudged, holeIdx, 2), tris = [];
+    function ccw(a, b, c) { return (nudged[2 * b] - nudged[2 * a]) * (nudged[2 * c + 1] - nudged[2 * a + 1]) - (nudged[2 * b + 1] - nudged[2 * a + 1]) * (nudged[2 * c] - nudged[2 * a]); }
+    for (i = 0; i < raw.length; i += 3) tris.push(ccw(raw[i], raw[i + 1], raw[i + 2]) >= 0 ? [raw[i], raw[i + 1], raw[i + 2]] : [raw[i], raw[i + 2], raw[i + 1]]);
+    var usedPt = new Array(ids.length).fill(false), edgeTri = new Map();
+    function setEdges(ti) { var t = tris[ti]; for (var k = 0; k < 3; k++) edgeTri.set(t[k] * ids.length + t[(k + 1) % 3], ti); }
+    tris.forEach(function (t, ti) { usedPt[t[0]] = usedPt[t[1]] = usedPt[t[2]] = true; setEdges(ti); });
+    rings.forEach(function (r, ri) {
+      var n = r.length, s0 = start[ri], first = -1, k;
+      for (k = 0; k < n; k++) if (usedPt[s0 + k]) { first = k; break; }
+      if (first < 0) return; // a ring with no area: nothing to stitch
+      for (k = 0; k < n; k++) {
+        var A = s0 + (first + k) % n;
+        if (!usedPt[A]) continue;
+        var run = [], j = 1;
+        while (j < n && !usedPt[s0 + (first + k + j) % n]) { run.push(s0 + (first + k + j) % n); j++; }
+        if (!run.length) continue;
+        var B = s0 + (first + k + j) % n, ti = edgeTri.get(A * ids.length + B);
+        if (ti === undefined) continue; // not a cap edge (earcut dropped the whole stretch): leave it
+        var t = tris[ti], C = t[0] !== A && t[0] !== B ? t[0] : (t[1] !== A && t[1] !== B ? t[1] : t[2]);
+        var chain = [A].concat(run, [B]);
+        tris[ti] = [chain[0], chain[1], C]; setEdges(ti);
+        for (var q = 1; q + 1 < chain.length; q++) { tris.push([chain[q], chain[q + 1], C]); setEdges(tris.length - 1); }
+      }
+    });
+    return tris.map(function (t) { return [ids[t[0]], ids[t[1]], ids[t[2]]]; });
   }
 
   function cutShell(sh, a, value, sgn) {
@@ -328,13 +281,21 @@
     var u = sgn > 0 ? (a + 2) % 3 : (a + 1) % 3, w = sgn > 0 ? (a + 1) % 3 : (a + 2) % 3;
     function pos(id) { return [V[3 * id + u], V[3 * id + w]]; }
     loops = loops.filter(function (l) { return Math.abs(polyArea(l, pos)) > 0; });
+    // where to test "is this loop inside that one": a vertex no other loop shares (a shared one is a pinch point
+    // lying on the other loop's boundary), else the middle of the first edge
+    var uses = new Map();
+    loops.forEach(function (l) { l.forEach(function (id) { uses.set(id, (uses.get(id) || 0) + 1); }); });
+    function probe(l) {
+      for (var q = 0; q < l.length; q++) if (uses.get(l[q]) === 1) return pos(l[q]);
+      var p0 = pos(l[0]), p1 = pos(l[1]); return [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+    }
     var depth = loops.map(function (l, li) {
-      var p = pos(l[0]), dp = 0;
+      var p = probe(l), dp = 0;
       loops.forEach(function (o, oi) { if (oi !== li && pointInPoly(p[0], p[1], o, pos)) dp++; });
       return dp;
     });
     var parent = loops.map(function (l, li) { // innermost loop that contains this one
-      var p = pos(l[0]), best = -1, ba = Infinity;
+      var p = probe(l), best = -1, ba = Infinity;
       loops.forEach(function (o, oi) {
         if (oi === li || depth[oi] !== depth[li] - 1 || !pointInPoly(p[0], p[1], o, pos)) return;
         var ar = Math.abs(polyArea(o, pos)); if (ar < ba) { ba = ar; best = oi; }

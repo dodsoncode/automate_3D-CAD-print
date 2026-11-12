@@ -217,3 +217,20 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: full run 106 passed (image3d + gui) and 39 passed (firmware); artifact republished from the final page; branch `image3d-tool` pushed; PR #7 opened to `main` (not merged).
 - NEXT: Jacob - TI6 (try the artifact editor on the phone), TI7 (Hugging Face token + Render Blueprint, first real generation), then say when to merge. Render's Blueprint reads `render.yaml` from the branch it is pointed at, so either merge first or pick branch `image3d-tool`.
 - BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy, zip download inside the Claude app.
+
+### 2026-11-11 - Image3D: PR #7 merged
+- DONE: Jacob asked for the merge; PR #7 merged to `main` (2bc9d21). `render.yaml` and `image3d/` are now on `main`, so the Render Blueprint can use branch `main`.
+- NEXT: Jacob - TI7 (Hugging Face token + Render Blueprint per `image3d/DEPLOY.md`, first real generation) and TI6 (try the artifact editor on the phone).
+- BLOCKED: nothing for Claude. Still NOT verified: real phone, live Hugging Face call, Render deploy.
+### 2026-11-11 - Image3D: first live generation, two fixes from it
+- DONE (live check): with Jacob's Hugging Face token, ran `server.generate_glb` against the real `tencent/Hunyuan3D-2` Space from Claude's workspace: valid GLB in about 10 s. This is the first real verification of the generation call (not through Render).
+- FOUND 1: the default model was about 917,000 triangles (13.8 MB), too heavy for a phone. FIX: new setting `HF_EXTRA_JSON` (default `{"octree_resolution": 128}` for the default Space) -> about 115,000 triangles (3.2 MB); 96 gives about 55,000. Measured live.
+- FOUND 2: cutting the real model left it not closed. Root cause: the hand-written cap triangulation (hole bridging + ear clipping) produced a wrong cap for the real cross-section (1496-point outline with a 1105-point cavity); small synthetic tests had not shown it. FIX: caps are now triangulated with earcut (vendored, `image3d/vendor/earcut.min.js`, ISC licence), with a stitch step so points on straight runs still join the walls. The failing cross-section is kept as `image3d/tests/fixtures/real_section.json` with a regression test; a bow-tie (pinch) cross-section test was added too.
+- Checked: 114 cuts across x/y/z on the 917k model and 54 on the 113k model: all closed, volume conserved to 5e-12. Page opened the real model at phone size in 0.9 s and cut it watertight. `image3d/tests` + `gui/tests`: 113 passed.
+- Verification level: script-checked and desktop-tested with REAL generated models. Still NOT verified: Render deploy, a real phone.
+- NEXT: Jacob - deploy on Render (TI7) and try on the phone (TI6). Jacob's token appeared in the chat; suggest replacing it after setup.
+
+### 2026-11-11 - Image3D: review of the cut fix, three more cases closed
+- DONE: independent review of the earcut change found open caps in three situations not covered by the real models: boundary points on exactly straight runs when earcut's hole bridge lands on an existing edge (grid-aligned holes), cross-sections that pinch to a point (shared vertex between loops), and loop nesting probed at a shared vertex. FIX: coordinates handed to earcut are nudged by about 1e-9 of the size (same point, same nudge; real coordinates and ids unchanged); nesting is probed at a vertex no other loop shares. `image3d/tests/fuzz_cut.js` added (grid holes + four pinch shapes, random triangle order): before the fix 297 of 1000 failed, after it 0 of 9000 (three seeds). A broken `HF_EXTRA_JSON` now answers 500 "server not configured" before anything is uploaded.
+- Verification level: script-checked (fuzz + regression tests) and re-checked on the two real generated models. Both real models came from one test picture and one Space, so other pictures are still untested. Render and a real phone: NOT verified.
+- NEXT: PR for branch `image3d-real-mesh-fixes`; Jacob - TI7, TI6.

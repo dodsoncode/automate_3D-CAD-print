@@ -4,11 +4,13 @@
 
 Env: HF_TOKEN (Hugging Face read token), IMAGE3D_PASSCODE (shared passcode),
      HF_SPACE (default tencent/Hunyuan3D-2), HF_API_NAME (default /shape_generation; set it to an empty
-     string to auto-pick an endpoint), HF_IMAGE_PARAM (default image: the keyword the endpoint takes the photo in).
+     string to auto-pick an endpoint), HF_IMAGE_PARAM (default image: the keyword the endpoint takes the photo in),
+     HF_EXTRA_JSON (extra settings for the call as a JSON object; default {"octree_resolution": 128} for the default Space).
 Everything is read per request, so the tests can set it with monkeypatch.
 """
 import concurrent.futures
 import hmac
+import json
 import os
 import tempfile
 import time
@@ -105,6 +107,10 @@ class GenerateGuard:
         passcode, token = os.environ.get("IMAGE3D_PASSCODE"), os.environ.get("HF_TOKEN")
         if not passcode or not token:
             return await reply(500, "server not configured")
+        try:  # a broken HF_EXTRA_JSON is a setup mistake too: say so before anything is uploaded or generated
+            _extra_settings(os.environ.get("HF_SPACE") or DEFAULT_SPACE, os.environ.get("HF_IMAGE_PARAM") or "image")
+        except RuntimeError as e:
+            return await reply(500, "server not configured: %s" % e)
         ip = _client_key(scope, headers)
         if _global_locked() or _is_locked(ip):
             return await reply(429, "too many attempts, try again later")
@@ -180,8 +186,28 @@ def _pick_endpoint(client):
     raise RuntimeError("could not find a generate endpoint on %s; set HF_API_NAME (see DEPLOY.md)" % HF_SPACE)
 
 
+# Hunyuan3D-2 at its default resolution (256) returns about 900,000 triangles, too heavy for a phone;
+# 128 gives about 115,000 and 96 about 55,000 (measured on a live run, 2026-11-11).
+DEFAULT_EXTRA = {"octree_resolution": 128}
+
+
+def _extra_settings(space, image_param):
+    """Extra keyword settings for the Space call, from HF_EXTRA_JSON (a JSON object). Unset: the lighter-mesh
+    default for the default Space, nothing for any other Space."""
+    raw = os.environ.get("HF_EXTRA_JSON")
+    if raw is None or not raw.strip():
+        return dict(DEFAULT_EXTRA) if space == DEFAULT_SPACE else {}
+    try:
+        extra = json.loads(raw)
+    except ValueError:
+        raise RuntimeError("HF_EXTRA_JSON is not valid JSON") from None
+    if not isinstance(extra, dict) or image_param in extra:
+        raise RuntimeError("HF_EXTRA_JSON must be a JSON object that does not set the photo input")
+    return extra
+
+
 def generate_glb(image_bytes, filename):
-    """Photo bytes -> GLB bytes through the Hugging Face Space. NOT verified against the live Space."""
+    """Photo bytes -> GLB bytes through the Hugging Face Space. Run once against the live default Space on 2026-11-11 (from a workspace, not from Render)."""
     from gradio_client import Client, handle_file  # lazy: tests and import must work without it
 
     token = os.environ.get("HF_TOKEN")
@@ -192,12 +218,13 @@ def generate_glb(image_bytes, filename):
         client = Client(space, hf_token=token)
     api_name = os.environ.get("HF_API_NAME", "/shape_generation") or _pick_endpoint(client)
     param = os.environ.get("HF_IMAGE_PARAM") or "image"
+    extra = _extra_settings(space, param)
     suffix = os.path.splitext(filename or "")[1] or ".png"
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "photo" + suffix)
         with open(path, "wb") as f:
             f.write(image_bytes)
-        job = client.submit(api_name=api_name, **{param: handle_file(path)})
+        job = client.submit(api_name=api_name, **{param: handle_file(path)}, **extra)
         try:
             result = job.result(timeout=TIMEOUT_S)
         except (TimeoutError, concurrent.futures.TimeoutError):
