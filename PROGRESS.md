@@ -308,3 +308,14 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Substep: review of the server slice job found no critical or important issues: passcode guard covers the slice routes with no bypass found, the one-slice-at-a-time rule is race-free, uploads are refused before the engine runs.
 - Left for the final review to triage (minor): a rare overlap if a slice thread outlives its timeout, a failed thread start leaving a stuck job for 16 minutes, the result file being read into memory instead of streamed, engine error text that can include server paths.
 - NEXT: Task 3 (the Slice for P1S panel on the page).
+
+### 2026-11-12 - P1S slicing Task 3: Slice for P1S panel on the phone page
+- Step 1 - tests written: 15 new browser tests in `image3d/tests/test_page.py` (390x844, touch). The server-mode fixture's script now has a FAKE slicer (sleeps 0.5 s, writes a tiny zip, records the received choice; a control file forces "unavailable" or a failure text; `SLICE_MAX_TRI` env gives a second fixture with a 10-triangle limit). Covers: hidden and no `api/slice` requests without the server, unavailable text, options listed + placement, no model / empty passcode, full flow with download and recorded choice, resume after reload, unknown saved job cleared silently, triangle limit hint, failure detail, wrong passcode, 422-list detail and TypeError wording, polling through a connection hiccup, result hidden after an edit (also while running), touch targets and single column.
+- Step 2 - red: `python -m pytest -q image3d/tests/test_page.py` with the old `index.html` -> 15 failed, 23 passed.
+- Step 3 - implemented: `image3d/index.html` - `#slice-panel` between Export and Generate (hidden until `api/health` succeeded and `api/slice/options` answered), four selects from the server's labels, `#btn-slice`, hint line (no model / too many triangles / not closed warning), 3 s polling with elapsed seconds, 20 minute give-up, hiccup text on network errors and 5xx, job id in `sessionStorage` and resumed on load (404 clears silently), result line + microSD note + `#btn-slice-download` (fetch -> Blob -> `<a download="model.gcode.3mf">`), result hidden on any edit/undo/open, a slice finishing after an edit is discarded with a message. Wake lock generalised (`wakeWanted()` = generating or slicing); network wording shared via `errText`. `image3d/image3d.html` rebuilt.
+- Step 4 - green: `python -m pytest -q image3d/tests` -> 242 passed (three runs, no warnings).
+- Step 5 - this entry and the commit.
+- DONE: Slice for P1S panel. Verification level: desktop browser at phone size (Playwright) with a FAKE slicer; not on a real phone; no real slice through the page.
+- NEXT: Task 4 (render.yaml wiring, docs, first real slice through the server and page).
+- BLOCKED: nothing.
+
