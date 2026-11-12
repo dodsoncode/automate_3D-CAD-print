@@ -303,3 +303,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: server slice job API. Verification level: script-checked, tested with a FAKE slicer; no real slice through the server yet (that is Task 4). NOT verified: Render, any real print, a real phone.
 - NEXT: Task 3 (page panel), then Task 4 (render.yaml wiring, docs, first real slice through the server).
 - BLOCKED: nothing.
+
+### 2026-11-12 - P1S slicing Task 2: independent review closed
+- Substep: review of the server slice job found no critical or important issues: passcode guard covers the slice routes with no bypass found, the one-slice-at-a-time rule is race-free, uploads are refused before the engine runs.
+- Left for the final review to triage (minor): a rare overlap if a slice thread outlives its timeout, a failed thread start leaving a stuck job for 16 minutes, the result file being read into memory instead of streamed, engine error text that can include server paths.
+- NEXT: Task 3 (the Slice for P1S panel on the page).
