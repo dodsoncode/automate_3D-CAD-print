@@ -155,6 +155,10 @@ _CONFIG = re.compile(r"^; (\w+) = (.*)$")
 _HEAD = re.compile(r"(?:N\d+\s*)?([GM])\s*0*(\d+)(\.\d+)?")
 _COMMAND = re.compile(r"(?<![A-Z0-9_.])[GM]\s*\d+(?![_0-9.])")
 _AXIS = re.compile(r"[XYE]")
+_NONCOMMAND_AXIS = re.compile(r"[XYEIJG]")         # a line that is not a G/M command must not move anything
+_UNSUPPORTED = {"G": {10, 18, 19, 53, 54, 55, 56, 57, 58, 59}, "M": {206, 428}}   # planes, offsets, coordinate systems
+_MODAL_DECIMAL = {0, 1, 2, 3, 90, 91, 92}         # G90.1, G91.1, G92.1, G1.1 ... change how moves are read
+_GLUED = re.compile(r"[0-9.][GM]")                # a G/M word stuck to the number before it
 _NUMBER_JOIN = re.compile(r"[0-9.][EX][0-9+\-.]")    # 3E2, 0X1F: read by strtof-style parsers as one number
 _WORD = re.compile(r"\s*([A-Z])\s*([+-]?(?:\d+\.?\d*|\.\d+))?")
 
@@ -175,13 +179,15 @@ def _config(lines):
 def _words(text, n):
     """'X10 y-5.5 E+1' -> {"X": 10.0, "Y": -5.5, "E": 1.0}. Anything unreadable in a move line -> SliceError."""
     out, pos = {}, 0
-    if _NUMBER_JOIN.search(text):
+    if _NUMBER_JOIN.search(text) or _GLUED.search(text):
         raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
     while pos < len(text):
         m = _WORD.match(text, pos)
         if not m or m.end() == pos or (m.group(2) is None and m.group(1) in "XYEIJR"):
             raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
         if m.group(2) is not None:
+            if m.group(1) in out and m.group(1) in "XYEIJR":
+                raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
             out[m.group(1)] = float(m.group(2))
         pos = m.end()
     return out
@@ -215,6 +221,7 @@ def _check_moves(lines):
     e_mode = None           # "abs" (M82), "rel" (M83); None until declared (the engine's purge comes before M83)
     e_pos = 0.0             # running extruder position in both modes, reset by G92 E
     printing = False
+    modal_ok = True         # False once a plane change, offset or modal G code has been seen before printing
 
     def bad(what, n):
         raise SliceError(500, "slice check failed: %s (line %d)" % (what, n))
@@ -226,6 +233,11 @@ def _check_moves(lines):
         text = ln.split(";", 1)[0].strip().upper()
         head = _HEAD.match(text) if text else None
         if not head:
+            if text and _NONCOMMAND_AXIS.search(text):      # "X300 E1", "T0 G1 X300": not a command we understand
+                if printing:
+                    bad("unsupported move", n)
+                x = y = None
+                modal_ok = False
             continue
         if len(_COMMAND.findall(text)) > 1:          # e.g. "G53 G1 X300", "M83 G1 X300"
             if printing:
@@ -233,6 +245,12 @@ def _check_moves(lines):
             x = y = None
             continue
         kind, code = head.group(1), int(head.group(2))
+        if code in _UNSUPPORTED[kind] or (kind == "G" and head.group(3) and code in _MODAL_DECIMAL):
+            if printing:
+                bad("unsupported move", n)
+            x = y = None
+            modal_ok = False
+            continue
         if kind == "M":
             if code == 82:
                 e_mode = "abs"
@@ -252,8 +270,6 @@ def _check_moves(lines):
                     bad("unsupported move", n)
                 x = y = None
             continue
-        if head.group(3) and code != 92:
-            bad("unreadable move", n)
         w = _words(args, n)
         if code == 92:   # set position
             if "X" in w or "Y" in w:
@@ -279,6 +295,8 @@ def _check_moves(lines):
                 extruding = e > e_pos if e_mode == "abs" and not rel_xy else (e > 0 or e > e_pos)
                 e_pos = e
         if printing and extruding:
+            if not modal_ok:
+                bad("unsupported move", n)
             if x is None or y is None:
                 bad("extruding move from an unknown position", n)
             points = [(x, y), (nx, ny)]

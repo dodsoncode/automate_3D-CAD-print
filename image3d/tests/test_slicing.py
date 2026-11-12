@@ -221,7 +221,39 @@ MOVE_REJECTS = [
     "M83 G1 X300 Y10 E1",
     "G1 X10 Y10 G1 X300 E1",
     "G2.1 X300 Y10 I1 E1",
+    # round 3: plane changes, decimal G codes, lines without a G/M command, repeated / glued words, offsets
+    "G1 X128 Y128 F9000\nG18\nG2 X100 Y129 I100 E1",
+    "G1 X128 Y128 F9000\nG19\nG3 X100 Y129 J100 E1",
+    "G1 X128 Y128 F9000\nG91\nG90.1\nG1 X200 E1",
+    "G90.1\nG2 X130 Y128 I5 J0 E1",
+    "G1 X128 Y128 F9000\nG91.1\nG2 X130 Y128 I5 J0 E1",
+    "G1 X128 Y128 F9000\nG1.1 X200 E1",
+    "G92.1\nG1 X128 Y128 E1",
+    "T0 G1 X300 E1",
+    "G1 X10 Y10 F9000\nX300 E1",
+    "G1 X10 Y10 F9000\nN10 X300 E1",
+    "G1 X300 X128 E1",
+    "G1 X300 E1 E-1",
+    "G1 X300 E1G1 X100",
+    "G1 X128 Y128 I1 I2 J1 E1",
+    "M206 X-200",
+    "M428",
+    "G10 L2 X-200",
+    "G53",
+    "G54",
+    "G55",
+    "G59",
+    "G59.3",
+    "G54.1 P1",
 ]
+
+
+@pytest.mark.parametrize("pre", ["G18", "G90.1", "G91.1", "G54", "G59.3", "M206 X-200", "G10", "T0 G1 X10"])
+def test_check_gcode_rejects_modal_changes_before_printing(pre):
+    g = gcode(body="G1 X100 Y100 E1").replace("G1 X110 Y110 F3000", pre + "\nG1 X110 Y110 F3000")
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(g, slicing.settings_for({}))
+    assert e.value.status == 500
 
 
 @pytest.mark.parametrize("body", MOVE_REJECTS)
@@ -252,6 +284,12 @@ def test_check_gcode_move_messages():
     assert "position reset not allowed" in msg("G1 X100 Y100 F9000\nG92 X0 Y0")
     assert "unsupported move" in msg("G5 X300 Y300 I1 J1 P1 Q1 E1")
     assert "unsupported move" in msg("G53 G1 X300 E1")
+    assert "unsupported move" in msg("G18")
+    assert "unsupported move" in msg("G90.1")
+    assert "unsupported move" in msg("T0 G1 X300 E1")
+    assert "unsupported move" in msg("M206 X-200")
+    assert "unreadable move" in msg("G1 X300 X128 E1")
+    assert "unreadable move" in msg("G1 X300 E1G1 X100")
     assert "outside the bed" in msg("G1 X128 Y128 F9000\nG2 X129 Y128 I-200 J0 E1")
     assert "outside the bed" in msg("G1 X30 Y100 F9000\nG2 X10 Y120 I-20 J0 E1")
 
@@ -266,6 +304,9 @@ MOVE_ACCEPTS = [
     "M83\nG1 X-5 Y5 E-0.8\nG1 X-5 Y5 E0",                                  # relative retract off the bed
     "G91\nG1 X5 Y5 E1\nG90\nG1 X100 Y100 E2",                             # small relative step on the bed
     "G28\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",                            # homed, then positioned
+    "T0\nT255\nG17\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",                  # tool word on its own line, XY plane
+    "G29.2 S0\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",                         # decimal code without axes
+    "N10 G1 X128 Y128 E1",                                                  # line number prefix
     "G4 P100\nG29\nG21\nG92 E0\nM83\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",   # commands the real engine writes
     "M82\nG92 E0\nG1 X101 Y100 E10\nM83\nG1 X102 Y100 E-6\nM82\nG1 X103 Y100 E5",  # E position kept across modes
     "G1 X100 Y100 F9000\nG2 X110 Y100 I5 J0 E1",                           # half circle, centre on bed
