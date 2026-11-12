@@ -319,3 +319,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NEXT: Task 4 (render.yaml wiring, docs, first real slice through the server and page).
 - BLOCKED: nothing.
 
+
+### 2026-11-12 - P1S slicing Task 3: independent review closed
+- Substep: review of the page panel found no critical or important issues: the panel stays hidden and silent outside the Render version, the screen stays awake while slicing, a result is discarded if the model is edited or replaced mid-slice, and polling cannot double up.
+- Left for the final review to triage (minor): changing a setting after a slice still shows the old file's Download button; a resumed job can be shown against a newly opened model; a wrong passcode during polling drops a finished job; no timeout on status requests.
+- NEXT: Task 4 (deploy wiring, printing guide, one real slice through the real server).
