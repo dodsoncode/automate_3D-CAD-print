@@ -104,5 +104,5 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 
 ## Slice and send from the phone (added 2026-11-12)
 - [x] TS1 (C) Feasibility spike (`docs/2026-11-12-slice-send-feasibility.md`)
-- [ ] TS2 (J) Decide: build "Slice for P1S" in the Render app; keep Handy or accept Developer Mode
+- [x] TS2 (J) Decided 2026-11-12: build "Slice for P1S" on the free Render instance; keep Handy
 - [ ] TS3 (J) Try once: upload a `.gcode.3mf` to the printer's SD card with an FTPS app on the phone, start it on the printer
