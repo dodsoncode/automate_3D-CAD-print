@@ -153,6 +153,9 @@ def _labels(choice):
 # ---------- G-code check ----------
 _CONFIG = re.compile(r"^; (\w+) = (.*)$")
 _HEAD = re.compile(r"(?:N\d+\s*)?([GM])\s*0*(\d+)(\.\d+)?")
+_COMMAND = re.compile(r"(?<![A-Z0-9_.])[GM]\s*\d+(?![_0-9.])")
+_AXIS = re.compile(r"[XYE]")
+_NUMBER_JOIN = re.compile(r"[0-9.][EX][0-9+\-.]")    # 3E2, 0X1F: read by strtof-style parsers as one number
 _WORD = re.compile(r"\s*([A-Z])\s*([+-]?(?:\d+\.?\d*|\.\d+))?")
 
 
@@ -172,6 +175,8 @@ def _config(lines):
 def _words(text, n):
     """'X10 y-5.5 E+1' -> {"X": 10.0, "Y": -5.5, "E": 1.0}. Anything unreadable in a move line -> SliceError."""
     out, pos = {}, 0
+    if _NUMBER_JOIN.search(text):
+        raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
     while pos < len(text):
         m = _WORD.match(text, pos)
         if not m or m.end() == pos or (m.group(2) is None and m.group(1) in "XYEIJR"):
@@ -183,12 +188,14 @@ def _words(text, n):
 
 
 def _arc_extremes(x, y, nx, ny, cx, cy, ccw):
-    """Left/right/top/bottom-most points an arc from (x, y) to (nx, ny) around (cx, cy) really sweeps through
-    (G3 = counter-clockwise, G2 = clockwise; start = end means a full circle)."""
+    """Left/right/top/bottom-most points an arc from (x, y) to (nx, ny) around (cx, cy) can reach, using the larger
+    of the start and end radius. G3 = counter-clockwise, G2 = clockwise. A sweep of (nearly) zero is what a
+    controller runs as a full circle, so it is bounded as one."""
     r = max(math.hypot(x - cx, y - cy), math.hypot(nx - cx, ny - cy))
     a0, a1 = math.atan2(y - cy, x - cx), math.atan2(ny - cy, nx - cx)
-    full = abs(nx - x) < 1e-6 and abs(ny - y) < 1e-6
-    sweep = 2 * math.pi if full else ((a1 - a0) if ccw else (a0 - a1)) % (2 * math.pi)
+    sweep = ((a1 - a0) if ccw else (a0 - a1)) % (2 * math.pi)
+    if sweep < 1e-9 or sweep > 2 * math.pi - 1e-9:
+        sweep = 2 * math.pi
     out = []
     for k, (dx, dy) in enumerate(((1, 0), (0, 1), (-1, 0), (0, -1))):
         t = k * math.pi / 2
@@ -198,14 +205,20 @@ def _arc_extremes(x, y, nx, ny, cx, cy, ccw):
 
 
 def _check_moves(lines):
-    """Walks the whole G-code keeping the X/Y position, G90/G91 and the extruder mode. From the first '; FEATURE:'
-    line on, every extruding move must stay inside the bed: the start and end of a line, and for an arc the whole
-    part of the circle it sweeps (the start sequence before that legitimately parks and purges near the edges)."""
-    x = y = None            # unknown until a move or G92 sets them; G28 forgets them
+    """Walks the whole G-code keeping the X/Y position, G90/G91, the extruder mode and the extruder position. From the
+    first '; FEATURE:' line on, every extruding move must stay inside the bed: the start and end of a line, and for
+    an arc the part of the circle it sweeps (the start sequence before that legitimately parks and purges near the
+    edges). It fails closed: anything outside the small grammar the engine writes (other motion commands, position
+    resets, several commands on a line, exponent numbers) is an error once printing has started."""
+    x = y = None            # unknown until a move sets them; G28 / G29 forget them
     rel_xy = False          # G91
-    rel_e = False           # M83 (G91 makes E relative too); the firmware starts in absolute mode
-    last_e = 0.0            # absolute extruder position (M82), reset by G92 E
+    e_mode = None           # "abs" (M82), "rel" (M83); None until declared (the engine's purge comes before M83)
+    e_pos = 0.0             # running extruder position in both modes, reset by G92 E
     printing = False
+
+    def bad(what, n):
+        raise SliceError(500, "slice check failed: %s (line %d)" % (what, n))
+
     for n, ln in enumerate(lines, 1):
         if not printing and ln.startswith("; FEATURE:"):
             printing = True
@@ -214,28 +227,41 @@ def _check_moves(lines):
         head = _HEAD.match(text) if text else None
         if not head:
             continue
+        if len(_COMMAND.findall(text)) > 1:          # e.g. "G53 G1 X300", "M83 G1 X300"
+            if printing:
+                bad("unsupported move", n)
+            x = y = None
+            continue
         kind, code = head.group(1), int(head.group(2))
         if kind == "M":
             if code == 82:
-                rel_e = False
+                e_mode = "abs"
             elif code == 83:
-                rel_e = True
+                e_mode = "rel"
             continue
-        if code == 90 or code == 91:
+        args = text[head.end():]
+        if code in (90, 91):
             rel_xy = code == 91
             continue
-        if code == 28:
+        if code in (28, 29) and not _AXIS.search(args):
             x = y = None
             continue
         if code not in (0, 1, 2, 3, 92):
+            if code != 4 and _AXIS.search(args):     # G5, G53, G28 X ...: could move anywhere
+                if printing:
+                    bad("unsupported move", n)
+                x = y = None
             continue
         if head.group(3) and code != 92:
-            raise SliceError(500, "slice check failed: unreadable move (line %d)" % n)
-        w = _words(text[head.end():], n)
+            bad("unreadable move", n)
+        w = _words(args, n)
         if code == 92:   # set position
-            x = w.get("X", x)
-            y = w.get("Y", y)
-            last_e = w.get("E", last_e)
+            if "X" in w or "Y" in w:
+                if printing:
+                    bad("position reset not allowed", n)
+                x = y = None
+            if "E" in w:
+                e_pos = w["E"]
             continue
         nx, ny = x, y
         if "X" in w:
@@ -244,24 +270,28 @@ def _check_moves(lines):
             ny = w["Y"] if not rel_xy else (y + w["Y"] if y is not None else None)
         extruding = False
         if "E" in w:
-            if rel_e or rel_xy:
-                extruding = w["E"] > 0
+            e = w["E"]
+            if e_mode == "rel":
+                extruding = e > 0
+                e_pos += e
             else:
-                extruding = w["E"] > last_e
-                last_e = w["E"]
+                # absolute, or ambiguous (undeclared mode, or G91): extruding if either reading says so
+                extruding = e > e_pos if e_mode == "abs" and not rel_xy else (e > 0 or e > e_pos)
+                e_pos = e
         if printing and extruding:
             if x is None or y is None:
-                raise SliceError(500, "slice check failed: extruding move from an unknown position (line %d)" % n)
+                bad("extruding move from an unknown position", n)
             points = [(x, y), (nx, ny)]
             if code in (2, 3):
                 if "I" not in w and "J" not in w:
-                    raise SliceError(500, "slice check failed: arc cannot be bounded (line %d)" % n)
+                    bad("arc cannot be bounded", n)
                 points += _arc_extremes(x, y, nx, ny, x + w.get("I", 0.0), y + w.get("J", 0.0), code == 3)
             for px, py in points:
                 if not (0 <= px <= BED_MM and 0 <= py <= BED_MM):
-                    raise SliceError(500, "slice check failed: extruding move outside the bed (X%.1f Y%.1f, line %d)"
-                                     % (px, py, n))
+                    bad("extruding move outside the bed (X%.1f Y%.1f)" % (px, py), n)
         x, y = nx, ny
+    if not printing:
+        raise SliceError(500, "slice check failed: no print moves found")
 
 
 def check_gcode(gcode, settings):

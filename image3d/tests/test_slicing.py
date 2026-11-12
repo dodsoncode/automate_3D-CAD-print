@@ -204,6 +204,23 @@ MOVE_REJECTS = [
     "G1 X300 Y10 E5",                               # mode never declared (the firmware default is absolute)
     "M82\nG92 E0\nG1 X300 Y10 E5",
     "M83\nG1 X-5 Y5 E1",
+    # round 2: zero-sweep arc = full circle; stale absolute E; either reading while the mode is undeclared
+    "G1 X128 Y128 F9000\nG2 X129 Y128 I-200 J0 E1",
+    "G1 X128 Y128 F9000\nG3 X129 Y128 I-200 J0 E1",
+    "M82\nG92 E0\nG1 X101 Y100 E100\nM83\nG1 X102 Y100 E-60\nM82\nG1 X300 Y100 E50",
+    "G92 E0\nG1 X101 Y100 E5\nG1 X-5 Y100 E3",
+    # exponent / hex numbers
+    "G1 X10 Y10 F9000\nG1 X3e2 E1",
+    "G1 X10 Y10 F9000\nG1 X1e3 Y10 E1",
+    "G1 X10 Y10 F9000\nG1 X0x1F E1",
+    # position resets, other motion commands, several commands on one line
+    "G1 X100 Y100 F9000\nG92 X0 Y0\nG1 X250 Y250 E1",
+    "G1 X100 Y100 F9000\nG92 Y-300\nG1 X100 E1",
+    "G5 X300 Y300 I1 J1 P1 Q1 E1",
+    "G53 G1 X300 E1",
+    "M83 G1 X300 Y10 E1",
+    "G1 X10 Y10 G1 X300 E1",
+    "G2.1 X300 Y10 I1 E1",
 ]
 
 
@@ -214,6 +231,17 @@ def test_check_gcode_rejects_unsafe_moves(body):
     assert e.value.status == 500
 
 
+def test_check_gcode_needs_print_moves():
+    body = "G1 X300 Y300 E5"
+    for g in (gcode(body=body).replace("; FEATURE: Outer wall\n", ""), "; printer_model = Bambu Lab P1S\n"):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.check_gcode(g, slicing.settings_for({}))
+        assert "no print moves found" in str(e.value) or "missing" in str(e.value)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(body=body).replace("; FEATURE: Outer wall\n", ""), slicing.settings_for({}))
+    assert "no print moves found" in str(e.value)
+
+
 def test_check_gcode_move_messages():
     def msg(body):
         with pytest.raises(slicing.SliceError) as e:
@@ -221,6 +249,10 @@ def test_check_gcode_move_messages():
         return str(e.value)
     assert "unreadable move" in msg("G1 X10 Y10 F9000\nG1 Xnan E1")
     assert "arc cannot be bounded" in msg("G1 X100 Y100 F9000\nG2 X110 Y100 R5 E1")
+    assert "position reset not allowed" in msg("G1 X100 Y100 F9000\nG92 X0 Y0")
+    assert "unsupported move" in msg("G5 X300 Y300 I1 J1 P1 Q1 E1")
+    assert "unsupported move" in msg("G53 G1 X300 E1")
+    assert "outside the bed" in msg("G1 X128 Y128 F9000\nG2 X129 Y128 I-200 J0 E1")
     assert "outside the bed" in msg("G1 X30 Y100 F9000\nG2 X10 Y120 I-20 J0 E1")
 
 
@@ -234,7 +266,20 @@ MOVE_ACCEPTS = [
     "M83\nG1 X-5 Y5 E-0.8\nG1 X-5 Y5 E0",                                  # relative retract off the bed
     "G91\nG1 X5 Y5 E1\nG90\nG1 X100 Y100 E2",                             # small relative step on the bed
     "G28\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",                            # homed, then positioned
+    "G4 P100\nG29\nG21\nG92 E0\nM83\nG1 X100 Y100 F9000\nG1 X110 Y100 E1",   # commands the real engine writes
+    "M82\nG92 E0\nG1 X101 Y100 E10\nM83\nG1 X102 Y100 E-6\nM82\nG1 X103 Y100 E5",  # E position kept across modes
+    "G1 X100 Y100 F9000\nG2 X110 Y100 I5 J0 E1",                           # half circle, centre on bed
+    "G1 X128 Y128 F9000\nG2 X128.0001 Y128 I-20 J0 E1",                    # near-full circle that fits
 ]
+
+
+REAL_LINES = ['G1 X10.1 Y20 Z0.28 F5000.0 ;Move to start position', 'M109 S205;', 'G1 X10.1 Y200.0 Z0.28 F1500.0 E15 ;Draw the first line', 'G1 X10.4 Y200.0 Z0.28 F5000.0 ;Move to side a little', 'G1 X10.4 Y20 Z0.28 F1500.0 E30 ;Draw the second line', 'G92 E0 ;Reset Extruder', 'G1 X110 Y110 Z2.0 F3000 ;Move Z Axis up', 'M73 P14 R28', 'G90', 'G21', 'M83 ; use relative distances for extrusion', '; filament start gcode', 'M106 P3 S150', 'M142 P1 R35 S40', 'M981 S1 P20000 ;open spaghetti detector', 'M106 S0', 'M106 P2 S0', '; CHANGE_LAYER', '; Z_HEIGHT: 0.2', '; LAYER_HEIGHT: 0.2', 'G1 E-.8 F1800', '; layer num/total_layer_count: 1/187', '; update layer progress', 'M73 L1', 'M991 S0 P0 ;notify layer change', ';_SET_FAN_SPEED_CHANGING_LAYER', 'M204 S500', '; printing object model.stl id:0 copy 0', '; start printing object, unique label id: 16', 'M624 AQAAAAAAAAA=', 'G1 X134.602 Y118.011 F30000', 'G1 Z.6', 'G1 Z.2', 'G1 E.8 F1800', '; FEATURE: Support', '; LINE_WIDTH: 0.5', 'G1 F3000', 'G1 X134.602 Y121.697 E.13727', 'G2 X135.11 Y122.766 I3.199 J-.865 E.04432', 'G1 X135.11 Y117.528 E.1951', 'G3 X135.618 Y116.858 I2.098 J1.065 E.03146', 'G1 X135.618 Y132.943 E.59908', 'G2 X136.126 Y133.095 I.675 J-1.323 E.01986']
+
+
+def test_check_gcode_accepts_real_engine_lines():
+    """44 consecutive lines copied from real engine output: start purge, M83, retract, travel, support, arcs."""
+    body = "\n".join(REAL_LINES)
+    assert slicing.check_gcode(gcode(body=body), slicing.settings_for({}))["layers"] == 348
 
 
 @pytest.mark.parametrize("body", MOVE_ACCEPTS)
