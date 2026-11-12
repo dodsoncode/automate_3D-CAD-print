@@ -239,3 +239,13 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: Jacob asked for the merge; PR #9 (cut caps on real models, lighter models from the Space) merged to `main` (c91f2fa). PR #8 was closed as superseded by #9.
 - NEXT: Jacob - TI7 (Render Blueprint from branch `main` per `image3d/DEPLOY.md`), TI6 (try on the phone), then report the first real photo.
 - BLOCKED: nothing for Claude. Still NOT verified: Render deploy, a real phone, pictures other than the one test picture.
+
+### 2026-11-12 - Image3D: Render deploy and phone confirmed by Jacob; PR #10 merged
+- DONE: PR #10 (merge-log entry) merged 2026-11-11. Jacob deployed the Render service and reports it "works well" on his phone (TI6, TI7) - this is the first confirmation on real hardware for the editor and for generation through Render. Details of what he tried are not recorded.
+- Workflow change (Jacob, 2026-11-11): merge-log entries are folded into the next working PR instead of their own one-line PRs (now in `CLAUDE.md`).
+
+### 2026-11-12 - Spike: slice for the P1S and send from the phone
+- DONE: feasibility check, written up in `docs/2026-11-12-slice-send-feasibility.md`. Slicing is feasible: the OrcaSlicer engine (npm `orcaslicer-addon`, stock Bambu profiles) sliced a 105k-triangle test model for P1S 0.4 nozzle / Bambu PLA Basic / textured PEI into a valid `.gcode.3mf` in about 17 CPU-seconds and about 300 MB RAM. Sending: a cloud server cannot reach the printer; third-party start-print needs LAN-only + Developer Mode (loses Handy and cloud); FTPS upload to the SD card may work without that.
+- Verification level: slicing script-checked in Claude's workspace only; the G-code has NOT been printed; nothing was tested on Render or on the printer; sending facts are web-checked only.
+- NEXT: Jacob decides: build "Slice for P1S" into the Render app; try an FTPS app upload once at home; relay or not.
+- BLOCKED: nothing.
