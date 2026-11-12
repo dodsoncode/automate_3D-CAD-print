@@ -293,3 +293,13 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Result: `image3d/tests/test_slicing.py` 112 passed with both real-engine slices running; a real 312,111-line sliced file passes the check in about 1.6 s. Verification level: script-checked with the real engine in Claude's workspace; nothing printed, nothing run on Render.
 - Left for later (minor): the glued-word rule is not applied to non-motion lines; only X/Y are bounds-checked (not Z).
 - NEXT: Task 2 (server slice job).
+
+### 2026-11-12 - P1S slicing Task 2: server slice job API
+- Step 1 - tests written: 23 new tests in `image3d/tests/test_server.py` (a FakeSlicer that writes a small zip, can block on an Event or raise): options available/unavailable (+503, health still ok), passcode and throttle on POST/status/file, no `HF_TOKEN` needed, happy path with attachment headers, choice passed through, job survives later requests, 409 while running, failed job detail, any exception fails the job (detail capped at 300), stale running job reported failed, bad upload / unknown option rejected before queueing, 404 for unknown ids, expiry (1801 s, dir removed, swept on a new request), newer job drops the older file, oversized body rejected before read.
+- Step 2 - red: with the old `server.py` restored, `python -m pytest -q image3d/tests/test_server.py` -> 1 failed, 85 errors (no `reset_jobs`, `SLICER`, `_worker`, `/api/slice` routes); the 40 old tests still passed.
+- Step 3 - implemented: `image3d/server.py` - `SLICER` / `SLICER_AVAILABLE` attributes, `GenerateGuard` extended to POST `/api/slice` and every `/api/slice/<id>[/file]` (only `IMAGE3D_PASSCODE` required there; the body cap applies to the POST only; `/api/slice/options` stays public), job store (dict + lock, `secrets.token_urlsafe(8)` ids, `tempfile.mkdtemp` per job, 1800 s keep, swept on every slice request, newer finished job drops older ones, one background thread at a time, any exception marks the job failed, running past `slicing.TIMEOUT_S` + 60 s reports failed), routes options / start (503, 409, synchronous `prepare_stl` + `settings_for` errors, 202) / status / file.
+- Step 4 - green: `python -m pytest -q image3d/tests/test_server.py` -> 63 passed (also with `-W error`, three runs); whole `image3d/tests` -> 226 passed.
+- Step 5 - this entry and the commit.
+- DONE: server slice job API. Verification level: script-checked, tested with a FAKE slicer; no real slice through the server yet (that is Task 4). NOT verified: Render, any real print, a real phone.
+- NEXT: Task 3 (page panel), then Task 4 (render.yaml wiring, docs, first real slice through the server).
+- BLOCKED: nothing.

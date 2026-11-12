@@ -12,12 +12,17 @@ import concurrent.futures
 import hmac
 import json
 import os
+import secrets
+import shutil
 import tempfile
+import threading
 import time
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
+
+import slicing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SPACE = "tencent/Hunyuan3D-2"
@@ -89,28 +94,41 @@ def _client_key(scope, headers):
     return fwd or (scope.get("client") or ("?",))[0]
 
 
+def _is_slice_route(path):
+    """POST /api/slice and everything under /api/slice/<id>; the public options list is the one exception."""
+    return path == "/api/slice" or (path.startswith("/api/slice/") and path != "/api/slice/options")
+
+
 class GenerateGuard:
-    """ASGI middleware for POST /api/generate: checks configuration and passcode from the headers alone, then
-    reads at most BODY_LIMIT bytes of body (also when chunked) BEFORE FastAPI parses the multipart upload."""
+    """ASGI middleware for POST /api/generate and the slice routes (POST /api/slice, /api/slice/<id>[/file]):
+    checks configuration and passcode from the headers alone, then (for the two POSTs) reads at most BODY_LIMIT
+    bytes of body (also when chunked) BEFORE FastAPI parses the multipart upload."""
 
     def __init__(self, inner):
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] != "/api/generate" or scope["method"] != "POST":
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        path = scope["path"]
+        generate = path == "/api/generate" and scope["method"] == "POST"
+        slice_route = _is_slice_route(path)
+        if not generate and not slice_route:
             return await self.inner(scope, receive, send)
         headers = dict(scope["headers"])
+        noun = "image" if generate else "model"
 
         async def reply(status, detail):
             await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
 
         passcode, token = os.environ.get("IMAGE3D_PASSCODE"), os.environ.get("HF_TOKEN")
-        if not passcode or not token:
+        if not passcode or (generate and not token):  # slicing needs no Hugging Face settings
             return await reply(500, "server not configured")
-        try:  # a broken HF_EXTRA_JSON is a setup mistake too: say so before anything is uploaded or generated
-            _extra_settings(os.environ.get("HF_SPACE") or DEFAULT_SPACE, os.environ.get("HF_IMAGE_PARAM") or "image")
-        except RuntimeError as e:
-            return await reply(500, "server not configured: %s" % e)
+        if generate:
+            try:  # a broken HF_EXTRA_JSON is a setup mistake too: say so before anything is uploaded or generated
+                _extra_settings(os.environ.get("HF_SPACE") or DEFAULT_SPACE, os.environ.get("HF_IMAGE_PARAM") or "image")
+            except RuntimeError as e:
+                return await reply(500, "server not configured: %s" % e)
         ip = _client_key(scope, headers)
         if _global_locked() or _is_locked(ip):
             return await reply(429, "too many attempts, try again later")
@@ -119,12 +137,14 @@ class GenerateGuard:
             _wrong(ip)
             return await reply(401, "wrong passcode")
         _fails.pop(ip, None)
+        if scope["method"] != "POST":
+            return await self.inner(scope, receive, send)  # the status and file reads have no body
         try:
             declared = int(headers.get(b"content-length", b"0") or 0)
         except ValueError:
             declared = 0
         if declared > BODY_LIMIT:
-            return await reply(413, "image is too large (10 MB limit)")
+            return await reply(413, "%s is too large (10 MB limit)" % noun)
         body = bytearray()
         while True:
             message = await receive()
@@ -132,7 +152,7 @@ class GenerateGuard:
                 return  # client went away
             body += message.get("body", b"")
             if len(body) > BODY_LIMIT:
-                return await reply(413, "image is too large (10 MB limit)")
+                return await reply(413, "%s is too large (10 MB limit)" % noun)
             if not message.get("more_body"):
                 break
         sent = False
@@ -266,3 +286,131 @@ async def generate(image: UploadFile = File(...)):
 @app.get("/")
 def root():
     return FileResponse(os.path.join(HERE, "image3d.html"), media_type="text/html")
+
+
+# ---------- Slice for P1S: one background job at a time ----------
+SLICER = slicing.run_slice  # tests replace this: (stl bytes, choice dict, workdir) -> (path, summary)
+SLICER_AVAILABLE = slicing.available  # tests replace this
+JOB_KEEP_S = 1800  # a finished job (and its file) stays this long
+JOB_STALE_S = slicing.TIMEOUT_S + 60  # a job still "running" after the slice timeout plus a margin has died
+_jobs = {}  # id -> job dict; guarded by _jobs_lock
+_jobs_lock = threading.Lock()
+_worker = None  # the latest background thread (the tests join it)
+
+
+def _drop(job_id):
+    job = _jobs.pop(job_id, None)
+    if job:
+        shutil.rmtree(job["dir"], ignore_errors=True)
+
+
+def _sweep_jobs():
+    """Caller holds _jobs_lock. Expires finished jobs and fails jobs that have been running too long."""
+    now = CLOCK()
+    for job_id, job in list(_jobs.items()):
+        if job["state"] == "running" and now - job["started"] > JOB_STALE_S:
+            job.update(state="failed", detail="the slice timed out", finished=now)
+        if job["state"] != "running" and now - job["finished"] >= JOB_KEEP_S:
+            _drop(job_id)
+
+
+def reset_jobs():
+    with _jobs_lock:
+        for job_id in list(_jobs):
+            _drop(job_id)
+
+
+def _run_job(job, stl, choice):
+    try:
+        path, summary = SLICER(stl, choice, job["dir"])
+        outcome = dict(state="done", detail="", summary=summary, path=path)
+    except slicing.SliceError as e:
+        outcome = dict(state="failed", detail=str(e)[:MAX_DETAIL])
+    except Exception as e:  # whatever goes wrong, the job must not stay "running"
+        outcome = dict(state="failed", detail=("slice failed: %s" % (str(e) or e.__class__.__name__))[:MAX_DETAIL])
+    with _jobs_lock:
+        if _jobs.get(job["id"]) is job and job["state"] == "running":  # not already failed as stale or removed
+            job.update(outcome, finished=CLOCK())
+            for other_id in [i for i, o in _jobs.items() if o is not job and o["state"] != "running"]:
+                _drop(other_id)  # a newer job finished: the older results go
+
+
+@app.get("/api/slice/options")
+def slice_options():
+    options = {key: [{"id": r["id"], "label": r["label"]} for r in rows] for key, rows in slicing.OPTIONS.items()}
+    return {"available": bool(SLICER_AVAILABLE()), "limits": {"max_triangles": slicing.MAX_TRIANGLES},
+            "options": options}
+
+
+def _running():
+    return any(j["state"] == "running" for j in _jobs.values())
+
+
+@app.post("/api/slice")
+async def slice_start(model: UploadFile = File(...), filament: str = Form(None), quality: str = Form(None),
+                      plate: str = Form(None), supports: str = Form(None)):
+    global _worker
+    # configuration, passcode and body size are already enforced by GenerateGuard
+    if not SLICER_AVAILABLE():
+        return _fail(503, "slicer unavailable on this server")
+    with _jobs_lock:
+        _sweep_jobs()
+        if _running():
+            return _fail(409, "a slice is already running")
+    data = await model.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        return _fail(413, "model is too large (10 MB limit)")
+    choice = {k: v for k, v in (("filament", filament), ("quality", quality), ("plate", plate),
+                                ("supports", supports)) if v}
+    try:  # same checks run_slice repeats: a bad upload is answered now, nothing is queued
+        await run_in_threadpool(slicing.prepare_stl, data)
+        slicing.settings_for(choice)
+    except slicing.SliceError as e:
+        return _fail(e.status, str(e)[:MAX_DETAIL])
+    with _jobs_lock:
+        _sweep_jobs()
+        if _running():
+            return _fail(409, "a slice is already running")
+        job_id = secrets.token_urlsafe(8)
+        job = {"id": job_id, "state": "running", "detail": "", "summary": None, "path": None,
+               "dir": tempfile.mkdtemp(prefix="slice-"), "started": CLOCK(), "finished": None}
+        _jobs[job_id] = job
+        _worker = threading.Thread(target=_run_job, args=(job, data, choice), daemon=True)
+        _worker.start()
+    return JSONResponse({"job": job_id}, status_code=202)
+
+
+def _find_job(job_id):
+    """The job, or None. job_id is only ever looked up in the dict, never used in a path."""
+    with _jobs_lock:
+        _sweep_jobs()
+        return _jobs.get(job_id)
+
+
+@app.get("/api/slice/{job_id}")
+def slice_status(job_id: str):
+    job = _find_job(job_id)
+    if job is None:
+        return _fail(404, "no such slice (it may have expired)")
+    with _jobs_lock:
+        end = job["finished"] if job["finished"] is not None else CLOCK()
+        return {"state": job["state"], "detail": job["detail"], "summary": job["summary"],
+                "elapsed_s": int(end - job["started"])}
+
+
+@app.get("/api/slice/{job_id}/file")
+def slice_file(job_id: str):
+    job = _find_job(job_id)
+    if job is None:
+        return _fail(404, "no such slice (it may have expired)")
+    with _jobs_lock:
+        path = job["path"] if job["state"] == "done" else None
+    if path is None:
+        return _fail(409, "the slice is not finished")
+    try:
+        with open(path, "rb") as f:
+            content = f.read()
+    except OSError:
+        return _fail(404, "no such slice (it may have expired)")
+    return Response(content, media_type="application/octet-stream",
+                    headers={"Content-Disposition": 'attachment; filename="model.gcode.3mf"'})
