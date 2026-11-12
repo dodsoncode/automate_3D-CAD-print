@@ -31,7 +31,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 - Everything incl. existing tests: `python -m pytest -q image3d/tests gui/tests && (cd firmware && python -m pytest -q)`.
 
 ## Slice for P1S (Render version only)
-A section below Export turns the current model into `model.gcode.3mf` for a Bambu P1S (0.4 mm nozzle): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles. Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement).
+A section below Export turns the current model into `model.gcode.3mf` for a Bambu P1S (0.4 mm nozzle): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles. Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement; that figure adds two separate processes from a direct run and is not the server's real footprint on Render).
 
 ## Verification status
 
@@ -41,4 +41,4 @@ A section below Export turns the current model into `model.gcode.3mf` for a Bamb
 - Render deploy and generation on a phone: Jacob reported on 2026-11-12 that they work well (TI6, TI7). Details of what he tried are not recorded.
 - Slice for P1S: the slicer core (`slicing.py`) is script-checked with the real OrcaSlicer engine in Claude's workspace. The server is tested with a fake slicer, plus real end-to-end runs through the real server (`tests/e2e_slice.py`; 124,500-triangle model in 15.6 s with 2 CPU cores here, 368 MB peak for the engine process). The page is tested in a desktop browser at phone size with a fake slicer.
 - NOT verified: the slicer on Render, a real phone for the slice section, any print, and the artifact's `model.zip` download inside the real Claude app.
-- Open for Jacob: TS4 (redeploy and check the slicer is available), TS5 (first small test print, watched) and TS3 (FTPS upload test). See `../TASKS.md`.
+- Open for Jacob: SL4 (redeploy and check the slicer is available), SL5 (first small test print, watched) and SL3 (FTPS upload test). See `../TASKS.md`.

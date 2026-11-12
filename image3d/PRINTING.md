@@ -11,7 +11,7 @@ The first choice in each list is the default.
 
 ## Steps
 1. In the editor, get the model the way you want it, then open Slice for P1S and choose the four settings.
-2. Tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.
+2. Type the passcode in the Generate box at the top of the page first (the Slice section has no passcode field; with the box empty the page says "Enter the passcode in the Generate section first"). Then tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.
 3. Get the file onto the printer with route A or B below.
 4. On the printer's screen open the file (Files / SD card) and start it.
 
@@ -38,6 +38,10 @@ Other users report that route B works on the P1 series without LAN-only mode, bu
 3. The filament loaded is the filament you chose. The file is single-filament; with an AMS, pick the slot on the printer when you start the print.
 4. Watch the first layers.
 5. Stop the print if anything looks wrong.
+
+## If slicing fails
+- **"Still working... (connection hiccup)" for a while, then "The slice expired or was lost. Slice again.":** the server may have run out of memory (the free Render instance has 512 MB, and a big, tall model with fine quality and supports can need most of it; not measured on Render). Try a smaller or shorter model, 0.28 mm Extra Draft quality, or supports off if the model does not need them. If it keeps happening, the slicer needs a bigger Render instance.
+- **"Slicing failed" with supports off:** often the model has overhanging parts that would print in mid-air (the engine's own message mentions "floating regions"). Turn on Tree supports, or cut a flat base in the editor, and slice again.
 
 ## What is checked, and what is not
 Before the file is offered, the server checks it automatically:

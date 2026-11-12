@@ -8,7 +8,7 @@ Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-too
 
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
-- **Waiting on Jacob:** nothing for TI6 / TI7: he reported on 2026-11-12 that the Render deploy and the phone editor work well. Open now: TS4 (redeploy for the slicer), TS5 (first test print), TS3 (FTPS upload test).
+- **Waiting on Jacob:** nothing for TI6 / TI7: he reported on 2026-11-12 that the Render deploy and the phone editor work well. Open now: SL4 (redeploy for the slicer), SL5 (first test print), SL3 (FTPS upload test).
 - **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
 - **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
   Claude app.
@@ -157,9 +157,9 @@ second **free Render** service next to the mental fitness app.
 
 ## What Jacob does next
 
-1. **TS4 - get the slicer:** after the Slice for P1S PR is merged, redeploy on Render and follow "Updating to get the slicer" in [`DEPLOY.md`](DEPLOY.md).
-2. **TS5 - first test print:** a small model, watched, following [`PRINTING.md`](PRINTING.md).
-3. **TS3 (optional):** try the FTPS upload once and report whether it works on your printer.
+1. **SL4 - get the slicer:** after the Slice for P1S PR is merged, redeploy on Render and follow "Updating to get the slicer" in [`DEPLOY.md`](DEPLOY.md).
+2. **SL5 - first test print:** a small model, watched, following [`PRINTING.md`](PRINTING.md).
+3. **SL3 (optional):** try the FTPS upload once and report whether it works on your printer.
 (TI6 and TI7 are done: reported working on 2026-11-12.)
 
 ## How to run the tests

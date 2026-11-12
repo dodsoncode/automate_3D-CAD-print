@@ -82,7 +82,7 @@ changes. The Claude artifact version never shows the section.
 - A: card reader -> microSD -> start on the printer.
 - B: FTPS app on the phone over home Wi-Fi (implicit TLS, port 990, user `bblp`, password = access code) ->
   start on the printer. Reported to work on the P1 series without LAN-only mode; unverified on Jacob's
-  firmware - a 10-minute test (TS3).
+  firmware - a 10-minute test (SL3).
 
 ## Not in scope
 

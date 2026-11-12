@@ -103,8 +103,8 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] TI7 (J) Hugging Face token + Render deploy - deployed and working on Jacob's phone (2026-11-12)
 
 ## Slice and send from the phone (added 2026-11-12)
-- [x] TS1 (C) Feasibility spike (`docs/2026-11-12-slice-send-feasibility.md`)
-- [x] TS2 (J) Decided 2026-11-12: build "Slice for P1S" on the free Render instance; keep Handy
-- [ ] TS3 (J) Try once: upload a `.gcode.3mf` to the printer's SD card with an FTPS app on the phone, start it on the printer
-- [ ] TS4 (J) After the PR is merged: redeploy on Render, check the build log says `SLICER INSTALL: ok` and `/api/slice/options` shows `"available": true` (`image3d/DEPLOY.md`)
-- [ ] TS5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`)
+- [x] SL1 (C) Feasibility spike (`docs/2026-11-12-slice-send-feasibility.md`)
+- [x] SL2 (J) Decided 2026-11-12: build "Slice for P1S" on the free Render instance; keep Handy
+- [ ] SL3 (J) Try once: upload a `.gcode.3mf` to the printer's SD card with an FTPS app on the phone, start it on the printer
+- [ ] SL4 (J) After the PR is merged: redeploy on Render, check the build log says `SLICER INSTALL: ok` and `/api/slice/options` shows `"available": true` (`image3d/DEPLOY.md`)
+- [ ] SL5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`)

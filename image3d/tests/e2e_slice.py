@@ -6,6 +6,8 @@ NOT a pytest test (the name does not start with test_, so pytest never collects 
     python image3d/tests/e2e_slice.py            # (a) two_cubes.stl and (b) a ~120k-triangle bumpy sphere via the server
     python image3d/tests/e2e_slice.py --direct   # (c) slicing.run_slice on the heavy model in a child process, peak memory
 
+Peak memory: `ru_maxrss` is in KB on Linux (bytes on macOS), and the script assumes Linux.
+
 Prints the summary, wall seconds and (for --direct) peak RSS in MB; exits non-zero on any failed check.
 """
 import io
@@ -66,6 +68,8 @@ def run_through_server(name, stl):
     port = free_port()
     env = dict(os.environ, IMAGE3D_PASSCODE=PASSCODE)
     env.pop("HF_TOKEN", None)
+    tmp = tempfile.TemporaryDirectory()  # the server's slice folders live here and go when the script ends
+    env["TMPDIR"] = tmp.name
     server = subprocess.Popen([sys.executable, "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", str(port),
                                "--log-level", "warning"], cwd=IMAGE3D, env=env)
     base = "http://127.0.0.1:%d" % port
@@ -108,6 +112,7 @@ def run_through_server(name, stl):
             server.wait(10)
         except subprocess.TimeoutExpired:
             server.kill()
+        tmp.cleanup()
 
 
 def direct(stl):
