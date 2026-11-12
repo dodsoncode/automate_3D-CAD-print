@@ -259,3 +259,14 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Substep: Jacob approved the spec and plan (06:20) and asked for a PROGRESS entry for every step and substep.
 - Substep: controller pre-flight scan of the plan done; three small rulings recorded (error type signature, validation order, how the supports check compares values). No conflicts between tasks.
 - NEXT: Task 1 (slicer core) with a builder, then independent review.
+
+### 2026-11-12 - P1S slicing Task 1: slicer core
+- Step 1 - install.sh written and run: `bash image3d/slicer/install.sh` printed `SLICER INSTALL: ok` in 6.4 s (second run 1.3 s, idempotent). Node was already on PATH, so the Node download branch is untested. Profiles fetched with a sparse clone at pinned OrcaSlicer commit 47a17ad; `package.json` (orcaslicer-addon 0.1.0 exactly), `package-lock.json` and `.gitignore` (node_modules, resources, .node) added. Script-checked in Claude's workspace.
+- Step 2 - tests written: `image3d/tests/test_slicing.py` (prepare_stl, option tables, settings_for, check_gcode incl. parametrized mismatches, faked-engine run_slice cases, available, and two real-engine integration tests).
+- Step 3 - red: `python -m pytest -q image3d/tests/test_slicing.py` -> collection error `ModuleNotFoundError: No module named 'slicing'` (nothing implemented yet).
+- Step 4 - implemented: `image3d/slicing.py` (OPTIONS, available, prepare_stl, settings_for, check_gcode, run_slice, SliceError) and `image3d/slicer/slice_job.js`. One addition to the brief: the bed-bounds check also covers G2/G3 arc moves, because the real engine writes thousands of them (a 24-triangle test model gave 7.5k G3 and 0.8k G2 lines); `.orcaslicercli/` (scratch folder the engine creates in its working directory) added to `image3d/slicer/.gitignore`.
+- Step 5 - green: `python -m pytest -q image3d/tests/test_slicing.py` -> 22 passed, 0 skipped (the two real-engine tests ran: about 1.7 s and 1.0 s on small models); whole `image3d/tests` -> 112 passed.
+- Step 6 - this entry and the commit.
+- DONE: slicer core. Verification level: script-checked; real OrcaSlicer engine run in Claude's workspace on small test models (PLA Silk+ / 0.16 mm / Textured PEI / tree supports, and the defaults), results passed `check_gcode`. NOT verified: the Node download branch of `install.sh` (node was already on PATH), Render, any real print, a real phone.
+- NEXT: Task 2 (server job API on top of `slicing.run_slice`), then Task 3 (page panel), Task 4 (render.yaml wiring + docs).
+- BLOCKED: nothing.
