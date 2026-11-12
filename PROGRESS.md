@@ -234,3 +234,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: independent review of the earcut change found open caps in three situations not covered by the real models: boundary points on exactly straight runs when earcut's hole bridge lands on an existing edge (grid-aligned holes), cross-sections that pinch to a point (shared vertex between loops), and loop nesting probed at a shared vertex. FIX: coordinates handed to earcut are nudged by about 1e-9 of the size (same point, same nudge; real coordinates and ids unchanged); nesting is probed at a vertex no other loop shares. `image3d/tests/fuzz_cut.js` added (grid holes + four pinch shapes, random triangle order): before the fix 297 of 1000 failed, after it 0 of 9000 (three seeds). A broken `HF_EXTRA_JSON` now answers 500 "server not configured" before anything is uploaded.
 - Verification level: script-checked (fuzz + regression tests) and re-checked on the two real generated models. Both real models came from one test picture and one Space, so other pictures are still untested. Render and a real phone: NOT verified.
 - NEXT: PR for branch `image3d-real-mesh-fixes`; Jacob - TI7, TI6.
+
+### 2026-11-11 - Image3D: PR #9 merged
+- DONE: Jacob asked for the merge; PR #9 (cut caps on real models, lighter models from the Space) merged to `main` (c91f2fa). PR #8 was closed as superseded by #9.
+- NEXT: Jacob - TI7 (Render Blueprint from branch `main` per `image3d/DEPLOY.md`), TI6 (try on the phone), then report the first real photo.
+- BLOCKED: nothing for Claude. Still NOT verified: Render deploy, a real phone, pictures other than the one test picture.
