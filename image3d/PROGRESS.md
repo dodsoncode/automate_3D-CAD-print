@@ -131,6 +131,10 @@ second **free Render** service next to the mental fitness app.
 - Checked on real models: 168 cuts along all three axes on two models made from one test picture, all closed.
   The page opened and cut a real model at phone size. Not yet checked: Render, a real phone, other pictures.
 
+### Step 16 - Merge (20:56)
+- Jacob asked for the merge; PR #9 merged to `main` (c91f2fa). `main` now has the cut fix and the lighter-model
+  setting, so a Render Blueprint from `main` gets both.
+
 ## What Jacob does next
 
 1. **TI6 - try the editor (no setup):** open the "Image3D editor" artifact on the phone. Make a model on the
