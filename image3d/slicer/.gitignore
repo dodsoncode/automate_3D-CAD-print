@@ -3,3 +3,4 @@ resources/
 .node/
 .orcaslicercli/
 .node.tmp.*
+.install_ok

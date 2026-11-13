@@ -88,8 +88,26 @@ def _node_found():
     return any(os.access(os.path.join(d, path), os.X_OK) for d in os.environ.get("PATH", "").split(os.pathsep) if d)
 
 
+def _install_commit():
+    """The OrcaSlicer commit install.sh recorded after its smoke slice worked, or None."""
+    try:
+        with open(os.path.join(SLICER_DIR, ".install_ok")) as f:
+            for ln in f:
+                if ln.startswith("orca_commit="):
+                    return ln.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
 def available():
-    return (_node_found()
+    try:
+        with open(os.path.join(SLICER_DIR, "ORCA_COMMIT")) as f:
+            wanted = f.read().strip()
+    except OSError:
+        return False
+    return (bool(wanted) and _install_commit() == wanted
+            and _node_found()
             and os.path.isdir(os.path.join(SLICER_DIR, "node_modules", "orcaslicer-addon"))
             and os.path.isfile(os.path.join(SLICER_DIR, "resources", "profiles", "BBL.json")))
 

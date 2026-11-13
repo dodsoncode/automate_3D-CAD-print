@@ -36,7 +36,8 @@ changes. The Claude artifact version never shows the section.
 ## How it works
 
 - Engine: OrcaSlicer's slicing engine through the npm package `orcaslicer-addon` 0.1.0 (prebuilt Linux
-  binary; needs only Node and the C/C++ runtime), with Bambu's stock profiles from the OrcaSlicer repository
+  binary; needs Node >= 18 and, on the host, glibc >= 2.35, libstdc++ with GLIBCXX_3.4.30, libcrypto.so.3,
+  libfontconfig.so.1, libexpat and libz; `slicer/install.sh` proves this by slicing a 10 mm cube), with Bambu's stock profiles from the OrcaSlicer repository
   pinned to commit `47a17ad9a33af7871bdbf21935bc2c1a6a5e488f`.
 - Profiles used: printer `Bambu Lab P1S 0.4 nozzle`; process `<quality> @BBL X1C` (the P1S uses these);
   filament `<name> @BBL P1S 0.4 nozzle`.

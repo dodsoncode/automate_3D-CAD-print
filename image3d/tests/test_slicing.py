@@ -591,7 +591,7 @@ def test_run_slice_deletes_output_when_check_fails(monkeypatch, tmp_path):
 
 def test_run_slice_cleans_engine_scratch_folder(monkeypatch, tmp_path):
     slicer = tmp_path / "slicer"
-    (slicer / ".orcaslicercli" / "tmp").mkdir(parents=True)
+    (slicer / ".orcaslicercli" / "tmp").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(slicing, "SLICER_DIR", str(slicer))
     fake_run(monkeypatch, subprocess.CompletedProcess([], 1, stdout="", stderr="x"))
     with pytest.raises(slicing.SliceError):
@@ -781,6 +781,43 @@ def test_available_false_without_engine(monkeypatch, tmp_path):
     monkeypatch.setattr(slicing, "SLICER_DIR", str(tmp_path))
     assert slicing.available() is False
     assert slicing.node_path() == "node" or slicing.node_path().startswith(str(tmp_path))
+
+
+def fake_install(tmp_path, commit="abc123", marker=True, marker_commit=None):
+    """A slicer folder that looks installed: node on the PATH is whatever the test machine has."""
+    (tmp_path / "node_modules" / "orcaslicer-addon").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "resources" / "profiles").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "resources" / "profiles" / "BBL.json").write_text("{}")
+    (tmp_path / "ORCA_COMMIT").write_text(commit + "\n")
+    if marker:
+        (tmp_path / ".install_ok").write_text("orca_commit=%s\nnode=v22.0.0\n" % (marker_commit or commit))
+
+
+def test_available_needs_the_install_marker_with_the_current_commit(monkeypatch, tmp_path):
+    monkeypatch.setattr(slicing, "SLICER_DIR", str(tmp_path))
+    fake_install(tmp_path)
+    assert slicing.available() is True
+    (tmp_path / ".install_ok").unlink()
+    assert slicing.available() is False
+    fake_install(tmp_path, marker_commit="old999")
+    assert slicing.available() is False
+    (tmp_path / ".install_ok").write_text("garbage")
+    assert slicing.available() is False
+
+
+def test_install_script_and_python_share_one_commit_file():
+    script = open(os.path.join(I3D, "slicer", "install.sh")).read()
+    commit = open(os.path.join(I3D, "slicer", "ORCA_COMMIT")).read().strip()
+    assert len(commit) == 40 and commit not in script and "ORCA_COMMIT" in script
+    assert subprocess.run(["bash", "-n", os.path.join(I3D, "slicer", "install.sh")]).returncode == 0
+    assert ".install_ok" in open(os.path.join(I3D, "slicer", ".gitignore")).read().split()
+
+
+def test_smoke_cube_is_a_centred_10_mm_cube():
+    data = open(os.path.join(I3D, "slicer", "smoke_cube.stl"), "rb").read()
+    n, (xs, ys, zs) = read_stl(data)
+    assert n == 12 and len(data) == 84 + 50 * 12
+    assert (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)) == (123, 133, 123, 133, 0, 10)
 
 
 # ---------- the real engine ----------
