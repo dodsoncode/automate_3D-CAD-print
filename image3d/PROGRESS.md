@@ -7,6 +7,7 @@ Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-too
 ## Where it stands
 
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
+- **Slice for P1S, final fix wave (2026-11-12):** PETG HF + Cool Plate refused; G-code checks for bed heat, exact filament and the excluded bed corner; plain overhang and out-of-memory messages; engine run with a memory/time watchdog; leaner STL handling; install step that proves the engine with a test slice; page fixes (stale results, resume, passcode, poll timeout, floating-piece warning, incompatible plates, size in the result line). Verified with the real engine in Claude's workspace and with a fake slicer in a desktop browser. NOT verified: Render, a real phone, any print.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
 - **Waiting on Jacob:** nothing for TI6 / TI7: he reported on 2026-11-12 that the Render deploy and the phone editor work well. Open now: SL4 (redeploy for the slicer), SL5 (first test print), SL3 (FTPS upload test).
 - **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.

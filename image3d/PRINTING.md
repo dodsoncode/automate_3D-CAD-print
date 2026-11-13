@@ -35,23 +35,29 @@ Other users report that route B works on the P1 series without LAN-only mode, bu
 ## First-print checklist
 1. Make the first print a small model.
 2. The plate on the printer is the plate you chose on the page.
-3. The filament loaded is the filament you chose. The file is single-filament; with an AMS, pick the slot on the printer when you start the print.
+3. The filament loaded is the filament you chose. The file is single-filament; with an AMS, pick the slot on the printer when you start the print (how the printer treats the AMS slot for this file has not been verified on the printer).
 4. Watch the first layers.
 5. Stop the print if anything looks wrong.
 
 ## If slicing fails
 - **"Still working... (connection hiccup)" for a while, then "The slice expired or was lost. Slice again.":** the server may have run out of memory (the free Render instance has 512 MB, and a big, tall model with fine quality and supports can need most of it; not measured on Render). Try a smaller or shorter model, 0.28 mm Extra Draft quality, or supports off if the model does not need them. If it keeps happening, the slicer needs a bigger Render instance.
-- **"Slicing failed" with supports off:** often the model has overhanging parts that would print in mid-air (the engine's own message mentions "floating regions"). Turn on Tree supports, or cut a flat base in the editor, and slice again.
+- **"This model has overhanging parts that would print in mid-air. Turn on Tree supports, cut a flat base, or delete loose pieces, then slice again.":** supports were off and the engine found parts with nothing under them (it calls them "floating regions"). Do what the message says. The page also warns "N piece(s) float above the bed" while supports are off.
+- **"The slicer could not support this model's overhanging parts. Cut a flat base or delete loose pieces, then slice again.":** the same problem with Tree supports already on. Cut a flat base in the editor or delete loose pieces.
+- **"This model is too large to slice on this server (out of memory). Try a smaller or shorter model, 0.28 mm Extra Draft, or supports off.":** the server stopped the slicer before it ran out of memory. Do what the message says; if it keeps happening, the slicer needs a bigger Render instance.
+- **"Bambu PETG HF cannot be printed on the Cool Plate - choose another plate":** PETG HF cannot be used with the Cool Plate (Bambu's profile has no bed temperature for that plate). The page disables that plate when PETG HF is chosen; pick Textured PEI or Smooth PEI.
+- **The model is wider than about 240 mm:** the file may be refused after slicing, because the brim the slicer adds would leave the 256 mm bed (or enter the corner of the bed the P1S does not print in). Make the footprint smaller.
 
 ## What is checked, and what is not
 Before the file is offered, the server checks it automatically:
 - the printer model is the P1S and the nozzle is 0.4;
 - the filament, quality, plate and supports in the file match your choices;
-- every extruding move stays inside the 256 mm bed.
+- every extruding move stays inside the 256 mm bed and out of the front-left corner the P1S does not print in (the printer's own start-up purge line is the one exception);
+- the bed temperature for the chosen plate is above zero in the settings stored in the file, and a bed-heat command comes before printing starts.
 
 If a check fails, no file is offered and the page says why.
 
 NOT verified:
 - No print has been made from this tool's output.
 - The slicer has not yet run on Render.
-- Z height and temperatures are whatever Bambu's stock profiles set; they are not checked.
+- The actual temperature values (bed and nozzle) and the Z height are whatever Bambu's stock profiles set; they are not checked. Only "the bed temperature is above zero and the bed is told to heat" is checked.
+- How the printer handles the AMS slot for this file.

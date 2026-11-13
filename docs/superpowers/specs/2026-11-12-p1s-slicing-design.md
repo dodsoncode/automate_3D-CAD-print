@@ -52,7 +52,7 @@ changes. The Claude artifact version never shows the section.
      A file that fails any check is discarded and the page shows why.
 - Slicing is a background job: `POST /api/slice` returns a job id at once; the page polls
   `GET /api/slice/{id}` and downloads from `GET /api/slice/{id}/file`. A dropped connection does not lose the
-  result. Finished jobs are kept 30 minutes; only the latest result is kept.
+  result. Finished jobs are kept up to 30 minutes (less if the free server goes to sleep, which it does after 15 minutes without requests, or restarts); only the latest result is kept.
 - All three slice routes need the passcode header, with the same wrong-passcode throttle as Generate.
 
 ## Protecting what already works

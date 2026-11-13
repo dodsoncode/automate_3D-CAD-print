@@ -16,6 +16,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `build.py` | `python image3d/build.py` bundles `index.html` into `image3d.html` |
 | `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, closed check) and STL read/write |
 | `vendor/earcut.min.js` | Polygon triangulation for cut caps (earcut 2.2.4, ISC; see `vendor/LICENSES.txt`) |
+| Slicer licences | the slicer engine (npm `orcaslicer-addon`, AGPL-3.0-only) and OrcaSlicer's Bambu profiles (AGPL-3.0) are downloaded at build time and run unmodified in a separate process; nothing from them is committed to this repo. Revisit the licence terms if the service is ever opened to other people. |
 | `js/glb.js`, `js/obj.js`, `js/readany.js` | File readers (GLB, OBJ; `readany.js` picks by extension, STL goes through `stl.js`) |
 | `server.py` | FastAPI app for Render: serves the page, `GET /api/health`, `POST /api/generate` via a Hugging Face Space, and the slice job routes (`GET /api/slice/options`, `POST /api/slice`, `GET /api/slice/{id}`, `GET /api/slice/{id}/file`) |
 | `slicing.py`, `slicer/` | Slice for P1S: OrcaSlicer engine wrapper with option tables, model centring and the G-code safety checks; `slicer/install.sh` installs Node, the engine and Bambu's profiles at build time (always exits 0) |
