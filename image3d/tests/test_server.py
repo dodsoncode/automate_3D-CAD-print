@@ -413,3 +413,398 @@ def test_chunked_body_over_cap_via_client(client):
     r = client.post("/api/generate", content=gen(),
                     headers={"X-Passcode": "sesame", "Content-Type": "multipart/form-data; boundary=x"})
     assert r.status_code == 413
+
+
+# ---------- Slice for P1S: job API with a FAKE slicer ----------
+import struct  # noqa: E402
+import tempfile  # noqa: E402
+import threading  # noqa: E402
+import zipfile  # noqa: E402
+
+import slicing  # noqa: E402
+
+
+def cube_stl():
+    tris = [((0, 0, 0), (10, 0, 0), (10, 10, 0)), ((0, 0, 0), (10, 10, 0), (0, 10, 0))] * 6
+    out = bytearray(b"test".ljust(80, b"\0") + struct.pack("<I", len(tris)))
+    for t in tris:
+        out += struct.pack("<12fH", 0, 0, 0, *[c for v in t for c in v], 0)
+    return bytes(out)
+
+
+STL = cube_stl()
+FAKE_3MF = b"PK\x03\x04 fake sliced file"
+
+
+@pytest.fixture(autouse=True)
+def clean_jobs():
+    yield
+    server.reset_jobs()
+    worker = server._worker
+    if worker is not None:
+        worker.join(5)
+
+
+class FakeSlicer:
+    """Stands in for slicing.run_slice: records the call, writes a small zip, optionally blocks or raises."""
+
+    def __init__(self):
+        self.calls = []
+        self.gate = None      # an Event: the fake waits for it before finishing
+        self.error = None     # an exception to raise instead of finishing
+        self.dirs = []
+
+    def __call__(self, stl, choice, workdir, prepared=None):
+        self.calls.append((stl, choice))
+        self.prepared = prepared
+        self.dirs.append(workdir)
+        if self.gate is not None:
+            assert self.gate.wait(10)
+        if self.error is not None:
+            raise self.error
+        path = os.path.join(workdir, "model.gcode.3mf")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("Metadata/plate_1.gcode", "; fake")
+        with open(path, "rb") as f:
+            self.bytes = f.read()
+        return path, {"layers": 5, "filament_g": 1.2}
+
+
+@pytest.fixture
+def slicer(client, monkeypatch):
+    fake = FakeSlicer()
+    monkeypatch.setattr(server, "SLICER", fake)
+    monkeypatch.setattr(server, "SLICER_AVAILABLE", lambda: True)
+    yield fake
+    if fake.gate is not None:
+        fake.gate.set()
+
+
+def slice_post(client, data=STL, passcode="sesame", **fields):
+    headers = {} if passcode is None else {"X-Passcode": passcode}
+    return client.post("/api/slice", files={"model": ("part.stl", data, "model/stl")}, data=fields, headers=headers)
+
+
+def auth(passcode="sesame"):
+    return {"X-Passcode": passcode}
+
+
+def finish():
+    server._worker.join(10)
+
+
+def start_and_finish(client, **fields):
+    r = slice_post(client, **fields)
+    assert r.status_code == 202, r.text
+    finish()
+    return r.json()["job"]
+
+
+def test_options_when_available(client, slicer):
+    r = client.get("/api/slice/options")  # no passcode needed
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["limits"] == {"max_triangles": 150000}
+    assert set(body["options"]) == {"filament", "quality", "plate", "supports"}
+    assert body["options"]["filament"][0] == {"id": "pla_basic", "label": "PLA Basic"}
+    assert all("profile" not in row for rows in body["options"].values() for row in rows)
+
+
+def test_options_when_unavailable(client, monkeypatch):
+    monkeypatch.setattr(server, "SLICER_AVAILABLE", lambda: False)
+    r = client.get("/api/slice/options")
+    assert r.status_code == 200 and r.json()["available"] is False
+    r = slice_post(client)
+    assert r.status_code == 503 and r.json() == {"detail": "slicer unavailable on this server"}
+    assert client.get("/api/health").status_code == 200
+
+
+def test_slice_requires_passcode(client, slicer):
+    assert slice_post(client, passcode=None).status_code == 401
+    assert slice_post(client, passcode="nope").status_code == 401
+    job = start_and_finish(client)
+    assert client.get("/api/slice/" + job).status_code == 401
+    assert client.get("/api/slice/" + job + "/file").status_code == 401
+    assert client.get("/api/slice/" + job, headers=auth("nope")).status_code == 401
+    assert client.get("/api/slice/" + job, headers=auth()).status_code == 200
+
+
+def test_slice_wrong_passcodes_are_throttled(client, slicer):
+    for _ in range(5):
+        assert client.get("/api/slice/abc", headers=auth("nope")).status_code == 401
+    assert client.get("/api/slice/abc", headers=auth()).status_code == 429
+
+
+def test_slice_does_not_need_hf_token(client, slicer, monkeypatch):
+    monkeypatch.delenv("HF_TOKEN")
+    monkeypatch.setenv("HF_EXTRA_JSON", "not json")
+    job = start_and_finish(client)
+    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "done"
+    assert post(client).status_code == 500  # generating still needs them
+
+
+def test_slice_not_configured_without_passcode(client, slicer, monkeypatch):
+    monkeypatch.delenv("IMAGE3D_PASSCODE")
+    r = slice_post(client)
+    assert r.status_code == 500 and "server not configured" in r.json()["detail"]
+    assert client.get("/api/slice/abc").status_code == 500
+
+
+def test_slice_happy_path(client, slicer):
+    r = slice_post(client)
+    assert r.status_code == 202
+    job = r.json()["job"]
+    finish()
+    r = client.get("/api/slice/" + job, headers=auth())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "done" and body["detail"] == ""
+    assert body["summary"] == {"layers": 5, "filament_g": 1.2}
+    assert isinstance(body["elapsed_s"], int)
+    r = client.get("/api/slice/%s/file" % job, headers=auth())
+    assert r.status_code == 200
+    assert r.content == slicer.bytes
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert r.headers["content-disposition"] == 'attachment; filename="model.gcode.3mf"'
+
+
+def test_slice_passes_choice_to_slicer(client, slicer):
+    start_and_finish(client, filament="petg_hf", quality="fine", plate="smooth_pei", supports="tree")
+    stl, choice = slicer.calls[0]
+    assert stl == slicing.prepare_stl(STL)[0]            # the job gets the prepared bytes ...
+    assert slicer.prepared == slicing.prepare_stl(STL)[1]  # ... and their info, so nothing is parsed twice
+    assert choice == {"filament": "petg_hf", "quality": "fine", "plate": "smooth_pei", "supports": "tree"}
+
+
+def test_incompatible_filament_and_plate_is_a_400_before_queueing(client, slicer):
+    r = slice_post(client, filament="petg_hf", plate="cool")
+    assert r.status_code == 400 and "cannot be printed on the Cool Plate" in r.json()["detail"]
+    assert server._jobs == {} and slicer.calls == []
+
+
+def test_slice_choice_defaults_are_left_out(client, slicer):
+    start_and_finish(client, filament="pla_matte")
+    assert slicer.calls[0][1] == {"filament": "pla_matte"}
+
+
+def test_job_survives_and_file_downloads(client, slicer):
+    job = start_and_finish(client)
+    for _ in range(2):  # separate, later requests
+        assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "done"
+        r = client.get("/api/slice/%s/file" % job, headers=auth())
+        assert r.status_code == 200 and r.content == slicer.bytes
+
+
+def test_second_slice_while_running_is_409(client, slicer):
+    slicer.gate = threading.Event()
+    r = slice_post(client)
+    assert r.status_code == 202
+    job = r.json()["job"]
+    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "running"
+    assert client.get("/api/slice/%s/file" % job, headers=auth()).status_code == 409
+    r2 = slice_post(client)
+    assert r2.status_code == 409 and r2.json() == {"detail": "a slice is already running"}
+    slicer.gate.set()
+    finish()
+    assert slice_post(client).status_code == 202  # free again
+
+
+def test_failed_slice_reports_detail(client, slicer):
+    slicer.error = slicing.SliceError(500, "extruding move outside the bed")
+    job = start_and_finish(client)
+    body = client.get("/api/slice/" + job, headers=auth()).json()
+    assert body["state"] == "failed" and "extruding move outside the bed" in body["detail"]
+    assert body["summary"] is None
+    assert client.get("/api/slice/%s/file" % job, headers=auth()).status_code == 409
+
+
+def test_any_exception_fails_the_job_and_detail_is_capped(client, slicer):
+    slicer.error = RuntimeError("x" * 1000)
+    job = start_and_finish(client)
+    body = client.get("/api/slice/" + job, headers=auth()).json()
+    assert body["state"] == "failed" and body["detail"].startswith("slice failed: xxx")
+    assert len(body["detail"]) <= 300
+    slicer.error = slicing.SliceError(500, "y" * 1000)
+    job = start_and_finish(client)
+    assert len(client.get("/api/slice/" + job, headers=auth()).json()["detail"]) <= 300
+
+
+def test_running_job_is_not_failed_by_the_old_fixed_rule(client, slicer, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    slicer.gate = threading.Event()
+    job = slice_post(client).json()["job"]
+    clock.t += slicing.TIMEOUT_S + 600     # well past the old 960 s rule, the thread is alive
+    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "running"
+    assert slice_post(client).status_code == 409
+
+
+def test_stuck_job_after_the_absolute_cap_blocks_new_slices_while_its_thread_lives(client, slicer, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    slicer.gate = threading.Event()
+    job = slice_post(client).json()["job"]
+    clock.t += server.JOB_ABSOLUTE_CAP_S - 1
+    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "running"
+    clock.t += 2
+    body = client.get("/api/slice/" + job, headers=auth()).json()
+    assert body["state"] == "failed" and body["detail"] == "the slice stopped responding; restart the service if this persists"
+    r = slice_post(client)
+    assert r.status_code == 409 and r.json() == {"detail": "a slice is already running"}   # thread still alive
+    clock.t += server.JOB_KEEP_S + 1
+    assert client.get("/api/slice/" + job, headers=auth()).status_code == 200      # not dropped while its thread lives
+    slicer.gate.set()
+    finish()
+    assert client.get("/api/slice/%s/file" % job, headers=auth()).status_code in (404, 409)  # a late finish is no result
+    assert slice_post(client).status_code == 202
+
+
+def test_job_whose_thread_died_without_finishing_is_failed_and_does_not_block(client, slicer):
+    dead = threading.Thread(target=lambda: None)
+    dead.start()
+    dead.join()
+    server._jobs["dead1"] = {"id": "dead1", "state": "running", "detail": "", "summary": None, "path": None,
+                             "dir": tempfile.mkdtemp(prefix="slice-"), "started": server.CLOCK(), "finished": None,
+                             "thread": dead}
+    body = client.get("/api/slice/dead1", headers=auth()).json()
+    assert body["state"] == "failed" and "stopped unexpectedly" in body["detail"]
+    assert slice_post(client).status_code == 202
+
+
+def test_directory_or_thread_failure_answers_500_and_leaves_nothing(client, slicer, monkeypatch):
+    made = []
+    real = tempfile.mkdtemp
+
+    def mk(*a, **k):
+        made.append(real(*a, **k))
+        return made[-1]
+    monkeypatch.setattr(server.tempfile, "mkdtemp", mk)
+
+    class Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(server.threading, "Thread", Boom)
+    r = slice_post(client)
+    assert r.status_code == 500 and r.json() == {"detail": "could not start the slice"}
+    assert server._jobs == {} and made and not os.path.exists(made[0])
+    monkeypatch.setattr(server.tempfile, "mkdtemp", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    r = slice_post(client)
+    assert r.status_code == 500 and r.json() == {"detail": "could not start the slice"} and server._jobs == {}
+
+
+def test_options_list_the_incompatible_pairs(client, slicer):
+    assert client.get("/api/slice/options").json()["incompatible"] == [["petg_hf", "cool"]]
+
+
+def test_file_route_sends_the_bytes_even_if_the_folder_goes_away(client, slicer):
+    job = start_and_finish(client)
+    r = client.get("/api/slice/%s/file" % job, headers=auth())
+    assert r.status_code == 200 and r.content == slicer.bytes and not isinstance(r, server.FileResponse)
+
+
+@pytest.mark.parametrize("data, status", [
+    (b"hello", 400),
+    (b"\0" * 80 + struct.pack("<I", slicing.MAX_TRIANGLES + 1) + b"\0" * (50 * (slicing.MAX_TRIANGLES + 1)), 413),
+])
+def test_bad_upload_is_rejected_before_queueing(client, slicer, data, status):
+    r = slice_post(client, data=data)
+    assert r.status_code == status and r.json()["detail"]
+    assert server._jobs == {} and slicer.calls == []
+
+
+def test_unknown_option_is_rejected_before_queueing(client, slicer):
+    r = slice_post(client, filament="unobtainium")
+    assert r.status_code == 400 and "unknown filament option: unobtainium" in r.json()["detail"]
+    assert server._jobs == {} and slicer.calls == []
+
+
+def test_unknown_job_is_404(client, slicer):
+    assert client.get("/api/slice/nosuchid", headers=auth()).status_code == 404
+    assert client.get("/api/slice/nosuchid/file", headers=auth()).status_code == 404
+    assert client.get("/api/slice/..%2F..%2Fetc%2Fpasswd/file", headers=auth()).status_code == 404
+
+
+def test_jobs_expire(client, slicer, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    job = start_and_finish(client)
+    workdir = slicer.dirs[0]
+    assert os.path.isdir(workdir)
+    clock.t += 1799
+    assert client.get("/api/slice/" + job, headers=auth()).status_code == 200
+    clock.t += 2
+    assert client.get("/api/slice/" + job, headers=auth()).status_code == 404
+    assert client.get("/api/slice/%s/file" % job, headers=auth()).status_code == 404
+    assert not os.path.exists(workdir)
+
+
+def test_expiry_is_swept_on_a_new_slice_request(client, slicer, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    start_and_finish(client)
+    clock.t += 1801
+    assert slice_post(client, filament="petg_hf").status_code == 202
+    assert not os.path.exists(slicer.dirs[0])
+
+
+def test_new_job_drops_previous_file(client, slicer):
+    first = start_and_finish(client)
+    second = start_and_finish(client)
+    assert first != second
+    assert client.get("/api/slice/" + first, headers=auth()).status_code == 404
+    assert not os.path.exists(slicer.dirs[0])
+    assert client.get("/api/slice/%s/file" % second, headers=auth()).status_code == 200
+
+
+def test_job_ids_are_url_safe_tokens(client, slicer):
+    job = start_and_finish(client)
+    assert len(job) >= 8 and all(c.isalnum() or c in "-_" for c in job)
+
+
+def run_slice_asgi(headers, chunks, path="/api/slice", method="POST"):
+    import asyncio
+    pulled, sent = [], []
+
+    async def go():
+        it = iter(chunks)
+
+        async def receive():
+            pulled.append(1)
+            try:
+                return {"type": "http.request", "body": next(it), "more_body": True}
+            except StopIteration:
+                return {"type": "http.disconnect"}
+
+        async def send(m):
+            sent.append(m)
+
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method,
+                 "path": path, "raw_path": path.encode(), "query_string": b"", "root_path": "", "scheme": "http",
+                 "server": ("t", 80), "client": ("9.9.9.9", 1),
+                 "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}
+        await server.app(scope, receive, send)
+
+    asyncio.run(go())
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    return status, b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body"), len(pulled)
+
+
+def test_oversized_slice_body_rejected_before_read(client, slicer):
+    status, body, pulled = run_slice_asgi(
+        {"content-length": str(5 * 1024**3), "content-type": "multipart/form-data; boundary=x", "x-passcode": "sesame"},
+        [b"x" * 1000])
+    assert status == 413 and pulled == 0 and b"model is too large" in body
+    status, body, pulled = run_slice_asgi({"content-length": "999999999", "x-passcode": "nope"}, [b"x"])
+    assert status == 401 and pulled == 0
+    chunk, total = b"x" * 65536, 400
+    status, body, pulled = run_slice_asgi(
+        {"content-type": "multipart/form-data; boundary=x", "x-passcode": "sesame"}, [chunk] * total)
+    assert status == 413 and pulled < total // 2
+
+
+def test_a_150k_triangle_model_fits_the_body_cap():
+    assert 84 + 50 * slicing.MAX_TRIANGLES < server.MAX_BYTES

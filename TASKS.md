@@ -99,5 +99,12 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [x] TI3 (C) `mesh.js` + `stl.js` with Node tests (split, delete, scale, lay flat, cut, closed check)
 - [x] TI4 (C) Editor page + loaders + single-file build, browser test
 - [x] TI5 (C) `server.py` (FastAPI: serve page + `/api/generate` via Hugging Face) + `render.yaml`, tested with a fake generator; publish editor as artifact
-- [ ] TI6 (J) Try the artifact editor on the phone with a GLB from a Hugging Face Space page
-- [ ] TI7 (J) Hugging Face token + Render deploy; run one photo through (first real verification of generation)
+- [x] TI6 (J) Try the editor on the phone - Jacob reports it works well (2026-11-12)
+- [x] TI7 (J) Hugging Face token + Render deploy - deployed and working on Jacob's phone (2026-11-12)
+
+## Slice and send from the phone (added 2026-11-12)
+- [x] SL1 (C) Feasibility spike (`docs/2026-11-12-slice-send-feasibility.md`)
+- [x] SL2 (J) Decided 2026-11-12: build "Slice for P1S" on the free Render instance; keep Handy
+- [ ] SL3 (J) Try once: upload a `.gcode.3mf` to the printer's SD card with an FTPS app on the phone, start it on the printer
+- [ ] SL4 (J) After the PR is merged: redeploy on Render, check the build log says `SLICER INSTALL: ok` and `/api/slice/options` shows `"available": true` (`image3d/DEPLOY.md`)
+- [ ] SL5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`)

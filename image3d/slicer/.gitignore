@@ -1,0 +1,6 @@
+node_modules/
+resources/
+.node/
+.orcaslicercli/
+.node.tmp.*
+.install_ok

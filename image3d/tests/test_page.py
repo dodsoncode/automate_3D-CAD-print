@@ -271,7 +271,7 @@ def test_undo_limit_depends_on_triangle_count(page):
 
 # ---------- server mode (uvicorn + FAKE generator; no Hugging Face involved) ----------
 LAUNCH = """
-import sys, time, uvicorn
+import sys, os, json, time, uvicorn
 sys.path.insert(0, %r)
 import server
 glb = open(%r, 'rb').read()
@@ -280,6 +280,28 @@ def fake(image, name):
     time.sleep(1.0)
     return glb
 server.GENERATOR = fake
+import slicing, zipfile
+def ctl():
+    try:
+        return json.load(open(os.environ['SLICE_CTL']))
+    except Exception:
+        return {}
+def fake_slicer(stl, choice, workdir, prepared=None):
+    time.sleep(0.5)
+    c = ctl()
+    json.dump(choice, open(os.environ['SLICE_REC'], 'w'))
+    if c.get('fail'):
+        raise slicing.SliceError(500, c['fail'])
+    path = os.path.join(workdir, 'model.gcode.3mf')
+    with zipfile.ZipFile(path, 'w') as z:
+        z.writestr('Metadata/plate_1.gcode', '; fake')
+    summary = {'print_time': '1h 3m', 'filament_g': 39.0, 'layers': 348, 'triangles': 24, 'size_mm': [30.0, 20.0, 10.0]}
+    summary.update(slicing._labels(choice))
+    return path, summary
+server.SLICER = fake_slicer
+server.SLICER_AVAILABLE = lambda: not ctl().get('unavailable')
+if os.environ.get('SLICE_MAX_TRI'):
+    slicing.MAX_TRIANGLES = int(os.environ['SLICE_MAX_TRI'])
 uvicorn.run(server.app, host='127.0.0.1', port=int(sys.argv[1]), log_level='warning')
 """ % (I3D, os.path.join(SAMPLES, "two_cubes.glb"))
 
@@ -311,8 +333,8 @@ def record_file(tmp_path_factory):
     return str(tmp_path_factory.mktemp("rec") / "received.bin")
 
 
-@pytest.fixture(scope="module")
-def live_server(record_file):
+def start_live(record_file, ctl_file, rec_file, **extra_env):
+    """Generator: starts the fake-generator + fake-slicer app in a subprocess, yields its URL, stops it."""
     pytest.importorskip("fastapi")
     import socket
     import time
@@ -321,7 +343,7 @@ def live_server(record_file):
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()
-    env = dict(os.environ, IMAGE3D_PASSCODE="sesame", HF_TOKEN="hf_fake")
+    env = dict(os.environ, IMAGE3D_PASSCODE="sesame", HF_TOKEN="hf_fake", SLICE_CTL=ctl_file, SLICE_REC=rec_file, **extra_env)
     proc = subprocess.Popen([sys.executable, "-c", LAUNCH, str(port), record_file], env=env)
     url = "http://127.0.0.1:%d/" % port
     try:
@@ -337,6 +359,34 @@ def live_server(record_file):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+@pytest.fixture(scope="module")
+def slice_files(tmp_path_factory):
+    d = tmp_path_factory.mktemp("slice")
+    return str(d / "ctl.json"), str(d / "choice.json")
+
+
+@pytest.fixture(scope="module")
+def live_server(record_file, slice_files):
+    yield from start_live(record_file, slice_files[0], slice_files[1])
+
+
+@pytest.fixture(scope="module")
+def tiny_limit_server(record_file, tmp_path_factory):
+    d = tmp_path_factory.mktemp("slice2")
+    yield from start_live(record_file, str(d / "ctl.json"), str(d / "choice.json"), SLICE_MAX_TRI="10")
+
+
+@pytest.fixture
+def ctl(slice_files):
+    """Control file the fake slicer reads on every call; removed after the test."""
+    def put(**kw):
+        with open(slice_files[0], "w") as f:
+            json.dump(kw, f)
+    yield put
+    if os.path.exists(slice_files[0]):
+        os.remove(slice_files[0])
 
 
 def test_generate_in_server_mode(browser, live_server):
@@ -436,4 +486,464 @@ def test_any_fetch_typeerror_shows_the_friendly_message(browser, live_server):
     assert pg.locator("#btn-generate").is_enabled()
     pg.wait_for_function("window.__wl.rel === 1")
     assert pg.evaluate("window.__wl") == {"req": 1, "rel": 1}
+    pg.context.close()
+
+
+# ---------- Slice for P1S panel ----------
+def slice_page(browser, url, init=None):
+    pg = new_page(browser, url, init)
+    pg.fill("#gen-pass", "sesame")
+    return pg
+
+
+def test_slice_panel_hidden_without_server(page):
+    assert not page.locator("#slice-panel").is_visible()
+    assert page.locator("#slice-panel").count() == 1
+
+
+def test_slice_panel_makes_no_requests_without_server(browser, server):
+    ctx = browser.new_context(viewport={"width": 390, "height": 844})
+    pg = ctx.new_page()
+    urls = []
+    pg.on("request", lambda r: urls.append(r.url))
+    pg.goto(server)
+    pg.wait_for_function("window.I3DApp")
+    pg.evaluate("I3DApp.ready")
+    assert not [u for u in urls if "api/slice" in u]
+    ctx.close()
+
+
+def test_slice_panel_unavailable_message(browser, live_server, ctl):
+    ctl(unavailable=True)
+    pg = new_page(browser, live_server)
+    assert pg.locator("#gen-panel").is_visible()
+    assert pg.locator("#slice-panel").is_visible()
+    assert pg.locator("#slice-panel").inner_text().strip() == "Slice for P1S\nSlicer unavailable on this server"
+    assert not pg.locator("#btn-slice").is_visible()
+    pg.context.close()
+
+
+def test_slice_options_listed(browser, live_server):
+    pg = new_page(browser, live_server)
+    assert pg.locator("#slice-panel").is_visible()
+    assert "Bambu P1S, 0.4 mm nozzle" in pg.locator("#slice-panel").inner_text()
+    labels = pg.locator("#slice-filament option").all_inner_texts()
+    assert len(labels) == 4 and "PLA Basic" in labels and "PLA Silk+" in labels
+    assert pg.eval_on_selector("#slice-filament", "e => e.selectedOptions[0].textContent") == "PLA Basic"
+    # placement: below Export, above Generate
+    order = pg.evaluate("""['btn-export','slice-panel','gen-panel'].map(i => document.getElementById(i).getBoundingClientRect().top)""")
+    assert order == sorted(order)
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_slice_button_needs_a_model_and_passcode(browser, live_server):
+    pg = new_page(browser, live_server)
+    assert pg.locator("#btn-slice").is_disabled()
+    open_sample(pg, "two_cubes.stl", rows=2)
+    assert pg.locator("#btn-slice").is_enabled()
+    pg.locator("#btn-slice").tap()  # passcode field is empty
+    assert pg.locator("#msg").inner_text() == "Enter the passcode in the Generate section first"
+    assert pg.locator("#btn-slice").is_enabled() and pg.locator("#slice-status").inner_text() == ""
+    pg.context.close()
+
+
+def test_slice_flow_downloads_file(browser, live_server, slice_files):
+    pg = slice_page(browser, live_server, WAKE)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.select_option("#slice-filament", "pla_silk_plus")
+    pg.select_option("#slice-supports", "tree")
+    pg.locator("#btn-slice").tap()
+    assert pg.locator("#btn-slice").is_disabled()
+    assert pg.locator("#slice-filament").is_disabled() and pg.locator("#slice-supports").is_disabled()
+    pg.wait_for_function("document.getElementById('slice-status').innerText.startsWith('Slicing... about 3 minutes on the free server; keep this screen open (')")
+    assert pg.evaluate("window.__wl.req") == 1
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    line = pg.locator("#slice-line").inner_text()
+    assert line == "Print time 1h 3m \u00b7 39 g \u00b7 348 layers \u00b7 PLA Silk+, 0.20 mm Standard, Textured PEI, tree supports \u00b7 30 x 20 x 10 mm"
+    assert "microSD" in pg.locator("#slice-result").inner_text()
+    assert pg.locator("#btn-slice").is_enabled() and pg.locator("#slice-filament").is_enabled()
+    pg.wait_for_function("window.__wl.rel === 1")
+    with pg.expect_download() as d:
+        pg.locator("#btn-slice-download").tap()
+    assert d.value.suggested_filename == "model.gcode.3mf"
+    import zipfile
+    assert zipfile.ZipFile(d.value.path()).namelist() == ["Metadata/plate_1.gcode"]
+    assert json.load(open(slice_files[1])) == {"filament": "pla_silk_plus", "quality": "standard", "plate": "textured_pei", "supports": "tree"}
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_slice_resumes_after_reload(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('slice-status').innerText.startsWith('Slicing...')")
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    pg.evaluate("I3DApp.ready")
+    assert pg.locator("#btn-slice").is_disabled()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    assert "PLA Basic" in pg.locator("#slice-line").inner_text()
+    assert "tree" not in pg.locator("#slice-line").inner_text()
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_slice_unknown_saved_job_clears_silently(browser, live_server):
+    pg = new_page(browser, live_server, "sessionStorage.setItem('image3d.slicejob', 'gone'); localStorage.setItem('image3d.pass', 'sesame');")
+    pg.wait_for_function("sessionStorage.getItem('image3d.slicejob') === null")
+    assert pg.locator("#msg.err").count() == 0
+    assert pg.locator("#slice-status").inner_text() == ""
+    pg.context.close()
+
+
+def test_slice_blocked_for_too_many_triangles(browser, tiny_limit_server):
+    pg = new_page(browser, tiny_limit_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    assert pg.locator("#btn-slice").is_disabled()
+    assert pg.locator("#slice-hint").inner_text() == "Model too detailed to slice here (24 triangles, limit 10) - generate a lighter model"
+    pg.context.close()
+
+
+def test_slice_failure_shows_detail(browser, live_server, ctl):
+    ctl(fail="engine exploded")
+    pg = slice_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('engine exploded')")
+    assert pg.locator("#msg.err").count() == 1
+    assert pg.locator("#btn-slice").is_enabled() and pg.locator("#slice-result").is_hidden()
+    assert pg.locator("#slice-status").inner_text() == ""
+    pg.context.close()
+
+
+def test_slice_wrong_passcode_shows_detail(browser, live_server):
+    pg = new_page(browser, live_server)
+    pg.fill("#gen-pass", "nope")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('wrong passcode')")
+    assert pg.locator("#btn-slice").is_enabled()
+    pg.context.close()
+
+
+def test_slice_list_detail_and_network_error_wording(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var realFetch = window.fetch;
+      window.__mode = 'list';
+      window.fetch = function (u, o) {
+        if (String(u) === 'api/slice' && window.__mode === 'list') return Promise.resolve(new Response(JSON.stringify({detail: [{loc: ['body']}]}), {status: 422}));
+        if (String(u) === 'api/slice' && window.__mode === 'net') return Promise.reject(new TypeError('Load failed'));
+        return realFetch.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText === 'Slice request was not accepted'")
+    pg.evaluate("window.__mode = 'net'")
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('waking up')")
+    assert "Load failed" not in pg.locator("#msg").inner_text()
+    assert pg.locator("#btn-slice").is_enabled()
+    pg.context.close()
+
+
+def test_slice_keeps_polling_through_connection_hiccups(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var realFetch = window.fetch, n = 0;
+      window.fetch = function (u, o) {
+        if (String(u).split('/').length === 3 && String(u).indexOf('api/slice/') === 0 && String(u) !== 'api/slice/options' && n++ === 0) return Promise.reject(new TypeError('Load failed'));
+        return realFetch.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('slice-status').innerText === 'Still working... (connection hiccup)'")
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.context.close()
+
+
+def test_slice_result_hidden_after_edit(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.locator("#btn-rot-x").tap()
+    assert pg.locator("#slice-result").is_hidden()
+    pg.reload()
+    pg.evaluate("I3DApp.ready")
+    assert pg.locator("#slice-result").is_hidden()  # the saved job went with the edit
+    pg.context.close()
+
+
+def test_slice_edit_while_running_drops_the_result(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.locator("#btn-rot-x").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('edited while slicing')")
+    assert pg.locator("#slice-result").is_hidden()
+    pg.context.close()
+
+
+def test_slice_touch_targets_and_single_column(browser, live_server):
+    pg = new_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    heights = pg.evaluate("""[...document.querySelectorAll('#slice-panel button, #slice-panel select')]
+      .filter(e => e.getBoundingClientRect().height > 0).map(e => [e.id, e.getBoundingClientRect().height, e.getBoundingClientRect().right])""")
+    assert {h[0] for h in heights} >= {"slice-filament", "slice-quality", "slice-plate", "slice-supports", "btn-slice"}
+    assert [h for h in heights if h[1] < 44] == []
+    assert [h for h in heights if h[2] > 390] == []
+    assert pg.evaluate("document.documentElement.scrollWidth") <= 390
+    pg.context.close()
+
+
+# ---------- final review fixes for the slice panel (D1-D4) ----------
+HOLD_OPTIONS = """
+(function () {
+  var realFetch = window.fetch;
+  if (sessionStorage.getItem('hold')) {
+    var gate = new Promise(function (r) { window.__release = r; });
+    window.fetch = function (u) {
+      var a = arguments, self = this;
+      if (String(u) === 'api/slice/options') return gate.then(function () { return realFetch.apply(self, a); });
+      return realFetch.apply(this, arguments);
+    };
+  }
+})();
+"""
+
+
+def held_page(browser, url, init=""):
+    """A page whose api/slice/options answer waits for window.__release(), so a model can be opened before a
+    saved job resumes. Returns it with the passcode stored and sessionStorage 'hold' set (first load not held)."""
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+    pg = ctx.new_page()
+    pg.add_init_script(HOLD_OPTIONS + init)
+    pg.set_default_timeout(8000)
+    pg.errors = []
+    pg.on("pageerror", lambda e: pg.errors.append(str(e)))
+    return pg
+
+
+def finished_job_page(browser, url, init=""):
+    """Slices once so that a finished job id sits in sessionStorage; then reloads with options held."""
+    pg = held_page(browser, url, init)
+    pg.goto(url)
+    pg.wait_for_function("window.I3DApp")
+    pg.evaluate("I3DApp.ready")
+    pg.fill("#gen-pass", "sesame")
+    pg.evaluate("localStorage.setItem('image3d.pass', 'sesame')")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.evaluate("sessionStorage.setItem('hold', '1')")
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    return pg
+
+
+def test_slice_select_change_hides_result_and_download(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.select_option("#slice-quality", "fine")
+    assert pg.locator("#slice-result").is_hidden() and pg.locator("#btn-slice-download").is_hidden()
+    assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is None
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.select_option("#slice-supports", "tree")
+    assert pg.locator("#slice-result").is_hidden()
+    pg.context.close()
+
+
+def test_resumed_result_without_a_model_is_labelled(browser, live_server):
+    pg = finished_job_page(browser, live_server)
+    pg.evaluate("window.__release()")
+    pg.evaluate("I3DApp.ready")
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    assert pg.locator("#slice-line").inner_text().startswith("Result from your earlier slice: Print time ")
+    assert pg.locator("#btn-slice-download").is_enabled()
+    pg.context.close()
+
+
+def test_resumed_result_with_a_model_open_is_discarded(browser, live_server):
+    pg = finished_job_page(browser, live_server)
+    open_sample(pg, "two_cubes.stl", rows=2)       # a model is open when the saved job resumes
+    pg.evaluate("window.__release()")
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('edited while slicing')")
+    assert pg.locator("#slice-result").is_hidden()
+    assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is None
+    assert pg.locator("#btn-slice").is_enabled()
+    pg.context.close()
+
+
+def test_status_401_keeps_the_saved_job_and_stops_polling(browser, live_server):
+    pg = finished_job_page(browser, live_server, """
+      window.__polls = 0;
+      var rf = window.fetch;
+      window.fetch = function (u) {
+        var x = String(u);
+        if (sessionStorage.getItem('hold') && x.indexOf('api/slice/') === 0 && x !== 'api/slice/options') { window.__polls++; return Promise.resolve(new Response(JSON.stringify({detail: 'wrong passcode'}), {status: 401})); }
+        return rf.apply(this, arguments);
+      };""")
+    pg.evaluate("window.__release()")
+    pg.wait_for_function("document.getElementById('msg').innerText === 'Enter the passcode in the Generate section, then reload to get your slice'")
+    assert pg.locator("#msg.err").count() == 1
+    assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is not None
+    assert pg.locator("#slice-filament").is_enabled() and pg.locator("#slice-status").inner_text() == ""
+    n = pg.evaluate("window.__polls")
+    pg.wait_for_timeout(3600)                       # longer than one poll interval
+    assert pg.evaluate("window.__polls") == n == 1
+    pg.context.close()
+
+
+def test_resume_with_an_empty_passcode_never_polls(browser, live_server):
+    pg = finished_job_page(browser, live_server, """
+      window.__polls = 0;
+      var rf = window.fetch;
+      window.fetch = function (u) {
+        var x = String(u);
+        if (x.indexOf('api/slice/') === 0 && x !== 'api/slice/options') window.__polls++;
+        return rf.apply(this, arguments);
+      };""")
+    pg.evaluate("localStorage.removeItem('image3d.pass')")
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    pg.evaluate("window.__release()")
+    pg.wait_for_function("document.getElementById('msg').innerText.startsWith('Enter the passcode in the Generate section')")
+    assert pg.evaluate("window.__polls") == 0
+    assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is not None
+    pg.context.close()
+
+
+def test_status_poll_times_out_and_counts_as_a_hiccup(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var realSetTimeout = window.setTimeout, rf = window.fetch, n = 0;
+      window.__signals = 0;
+      window.setTimeout = function (f, ms) { return realSetTimeout.call(window, f, ms === 25000 ? 150 : ms); };
+      window.fetch = function (u, o) {
+        var x = String(u);
+        if (x.indexOf('api/slice/') === 0 && x !== 'api/slice/options' && n++ === 0) {
+          if (o && o.signal) window.__signals++;
+          return new Promise(function (res, rej) { if (o && o.signal) o.signal.addEventListener('abort', function () { rej(new DOMException('aborted', 'AbortError')); }); });
+        }
+        return rf.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('slice-status').innerText === 'Still working... (connection hiccup)'")
+    assert pg.evaluate("window.__signals") == 1
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    pg.context.close()
+
+
+def test_post_has_no_timeout_signal_and_is_not_retried(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var rf = window.fetch; window.__posts = [];
+      window.fetch = function (u, o) {
+        if (String(u) === 'api/slice') { window.__posts.push(!!(o && o.signal)); return Promise.reject(new TypeError('Load failed')); }
+        return rf.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('waking up')")
+    pg.wait_for_timeout(500)
+    assert pg.evaluate("window.__posts") == [False]
+    pg.context.close()
+
+
+def test_resume_failure_ends_the_slicing_state(browser, live_server):
+    pg = finished_job_page(browser, live_server)
+    pg.evaluate("""Object.defineProperty(document.getElementById('slice-line'), 'textContent', {set: function () { throw new Error('boom'); }})""")
+    pg.evaluate("window.__release()")
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('boom')")
+    assert pg.locator("#slice-filament").is_enabled() and pg.locator("#slice-status").inner_text() == ""
+    assert not [e for e in pg.errors if "boom" in e]          # handled, not an unhandled rejection
+    pg.context.close()
+
+
+def box_stl(boxes):
+    """Binary STL of axis-aligned boxes: (sx, sy, sz, ox, oy, oz) each."""
+    import struct
+    tri = [0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5]
+    out = bytearray()
+    for sx, sy, sz, ox, oy, oz in boxes:
+        pts = [(ox + (i & 1) * sx, oy + ((i >> 1) & 1) * sy, oz + ((i >> 2) & 1) * sz) for i in range(8)]
+        for k in range(0, 36, 3):
+            out += struct.pack("<12fH", 0, 0, 0, *[c for i in tri[k:k + 3] for c in pts[i]], 0)
+    return b"x" * 80 + struct.pack("<I", len(out) // 50) + bytes(out)
+
+
+def open_boxes(pg, boxes, rows):
+    pg.set_input_files("#file", {"name": "boxes.stl", "mimeType": "model/stl", "buffer": box_stl(boxes)})
+    pg.wait_for_function("document.querySelectorAll('#pieces [data-i]').length === %d" % rows)
+
+
+def test_floating_pieces_warning(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_boxes(pg, [(40, 40, 4, 0, 0, 0), (8, 8, 8, 5, 5, 12), (8, 8, 8, 25, 25, 20)], 3)
+    assert pg.locator("#slice-float").inner_text() == "2 piece(s) float above the bed - delete them or turn on Tree supports"
+    assert pg.locator("#btn-slice").is_enabled()                      # a warning only
+    pg.select_option("#slice-supports", "tree")
+    assert pg.locator("#slice-float").inner_text() == ""
+    pg.select_option("#slice-supports", "off")
+    assert pg.locator("#slice-float").inner_text().startswith("2 piece(s)")
+    pg.context.close()
+
+
+def test_floating_warning_follows_edits_and_ignores_pieces_on_the_bed(browser, live_server):
+    pg = slice_page(browser, live_server)
+    open_boxes(pg, [(40, 40, 4, 0, 0, 0), (8, 8, 8, 5, 5, 0.2)], 2)  # 0.2 mm above is within the 0.3 mm tolerance
+    assert pg.locator("#slice-float").inner_text() == ""
+    open_boxes(pg, [(40, 40, 4, 0, 0, 0), (8, 8, 8, 5, 5, 12)], 2)
+    assert pg.locator("#slice-float").inner_text() == "1 piece(s) float above the bed - delete them or turn on Tree supports"
+    pg.locator("#pieces [data-i]").nth(1).tap()
+    pg.locator("#btn-delete").tap()
+    pg.wait_for_function("document.querySelectorAll('#pieces [data-i]').length === 1")
+    assert pg.locator("#slice-float").inner_text() == ""
+    pg.context.close()
+
+
+def test_incompatible_plate_is_disabled_and_selection_moves(browser, live_server):
+    pg = slice_page(browser, live_server)
+    pg.select_option("#slice-plate", "cool")
+    assert pg.eval_on_selector("#slice-plate option[value=cool]", "e => e.disabled") is False
+    pg.select_option("#slice-filament", "petg_hf")
+    assert pg.eval_on_selector("#slice-plate option[value=cool]", "e => e.disabled") is True
+    assert pg.eval_on_selector("#slice-plate option[value=textured_pei]", "e => e.disabled") is False
+    assert pg.eval_on_selector("#slice-plate", "e => e.value") == "textured_pei"
+    assert pg.locator("#slice-status").inner_text() == "Cool Plate is not available for Bambu PETG HF"
+    pg.select_option("#slice-filament", "pla_matte")
+    assert pg.eval_on_selector("#slice-plate option[value=cool]", "e => e.disabled") is False
+    pg.context.close()
+
+
+def test_incompatible_pair_400_still_shows_the_server_detail(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var rf = window.fetch;
+      window.fetch = function (u, o) {
+        if (String(u) === 'api/slice') return Promise.resolve(new Response(JSON.stringify({detail: 'Bambu PETG HF cannot be printed on the Cool Plate - choose another plate'}), {status: 400}));
+        return rf.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("document.getElementById('msg').innerText.includes('cannot be printed on the Cool Plate')")
+    assert pg.locator("#btn-slice").is_enabled()
+    pg.context.close()
+
+
+def test_result_line_shows_size_without_trailing_zero(browser, live_server):
+    pg = slice_page(browser, live_server, """
+      var rf = window.fetch;
+      window.fetch = function (u, o) {
+        var x = String(u);
+        if (x.indexOf('api/slice/') === 0 && x !== 'api/slice/options') return rf.apply(this, arguments).then(function (r) {
+          return r.clone().json().then(function (j) { if (j.summary) j.summary.size_mm = [70, 70.04, 12.5]; return new Response(JSON.stringify(j), {status: 200}); }); });
+        return rf.apply(this, arguments);
+      };""")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    assert pg.locator("#slice-line").inner_text().endswith(" \u00b7 70 x 70 x 12.5 mm")
     pg.context.close()

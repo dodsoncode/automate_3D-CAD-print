@@ -1,0 +1,9 @@
+{
+  "name": "image3d-slicer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OrcaSlicer engine used by the Slice for P1S feature",
+  "dependencies": {
+    "orcaslicer-addon": "0.1.0"
+  }
+}

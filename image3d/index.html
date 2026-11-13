@@ -35,9 +35,16 @@
   .chk.bad { background: #fbd5d5; color: #8a1c1c; }
   #msg { min-height: 22px; margin: 8px 0; font-weight: 500; }
   #msg.err { color: #a11; }
-  #howto, #gen-panel { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 10px; margin-top: 14px; font-size: 15px; }
+  #howto, #gen-panel, #slice-panel { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 10px; margin-top: 14px; font-size: 15px; }
   #howto a { display: inline-block; padding: 8px 0; color: #1257c4; word-break: break-all; }
-  #gen-panel[hidden] { display: none; }
+  #gen-panel[hidden], #slice-panel[hidden], #slice-form[hidden], #slice-unavailable[hidden], #slice-result[hidden] { display: none; }
+  .small { font-size: 13px; color: #566478; }
+  #slice-panel label { display: block; font-size: 13px; color: #566478; margin: 8px 0 2px; }
+  #slice-hint, #slice-status, #slice-float { margin-top: 6px; }
+  #slice-hint:empty, #slice-status:empty, #slice-float:empty { display: none; }
+  #slice-float { color: #8a5a00; }
+  #slice-result { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e1e6ee; }
+  #slice-result button { width: 100%; margin-top: 8px; }
   .val { text-align: center; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -72,6 +79,27 @@
 
     <div id="msg" role="status" aria-live="polite"></div>
     <div class="row"><button id="btn-export" class="primary">Export STL</button></div>
+
+    <div id="slice-panel" hidden>
+      <strong>Slice for P1S</strong>
+      <div id="slice-unavailable" hidden>Slicer unavailable on this server</div>
+      <div id="slice-form" hidden>
+        <div class="small">Bambu P1S, 0.4 mm nozzle</div>
+        <label for="slice-filament">Filament</label><select id="slice-filament"></select>
+        <label for="slice-quality">Quality</label><select id="slice-quality"></select>
+        <label for="slice-plate">Plate</label><select id="slice-plate"></select>
+        <label for="slice-supports">Supports</label><select id="slice-supports"></select>
+        <div class="row" style="margin-top:10px"><button id="btn-slice" class="primary" disabled>Slice</button></div>
+        <div id="slice-hint" class="small"></div>
+        <div id="slice-float" class="small" role="status"></div>
+        <div id="slice-status" role="status" aria-live="polite"></div>
+        <div id="slice-result" hidden>
+          <div id="slice-line"></div>
+          <div class="small">Copy the file to the printer's microSD card, then start it on the printer. First print: watch the first layers.</div>
+          <button id="btn-slice-download" class="primary">Download print file</button>
+        </div>
+      </div>
+    </div>
 
     <div id="howto">
       <strong>How to get a model</strong>
@@ -241,6 +269,7 @@
   function refresh() {
     cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); rebuildMeshes();
     $('btn-undo').disabled = !undoStack.length;
+    modelChanged();
   }
   function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
 
@@ -370,19 +399,22 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.ok === true) { App.serverMode = true; $('gen-panel').hidden = false; $('howto').hidden = true; } })
       .catch(function () { /* not server mode */ })
-      .then(function () { if (timer) clearTimeout(timer); });
+      .then(function () { if (timer) clearTimeout(timer); })
+      .then(function () { return App.serverMode ? loadSliceOptions() : null; });
   }
 
   // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor
-  var generating = false;
+  var generating = false, slicing = false;
   var wakeLock = null;
+  function wakeWanted() { return generating || slicing; }
+  function updateWake() { if (wakeWanted()) holdWake(); else dropWake(); }
   function holdWake() {
     try {
-      if (!generating || wakeLock || !navigator.wakeLock) return;
+      if (!wakeWanted() || wakeLock || !navigator.wakeLock) return;
       var p = navigator.wakeLock.request('screen');
       if (!p || !p.then) return;
       wakeLock = true; // claimed now so a second call cannot request again
-      p.then(function (l) { if (generating) wakeLock = l; else { wakeLock = null; try { l.release(); } catch (e) { /* ignore */ } } },
+      p.then(function (l) { if (wakeWanted()) wakeLock = l; else { wakeLock = null; try { l.release(); } catch (e) { /* ignore */ } } },
         function () { wakeLock = null; });
     } catch (e) { wakeLock = null; }
   }
@@ -393,7 +425,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') { if (wakeLock && wakeLock !== true) wakeLock = null; holdWake(); }
   });
-  function setGenerating(on, text) { generating = on; if (on) holdWake(); else dropWake(); $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
+  function setGenerating(on, text) { generating = on; updateWake(); $('btn-generate').disabled = on; $('gen-status').textContent = text || ''; }
   // downsize the photo before upload: longest side <= 1024 px, JPEG 0.9; the original file if decoding fails
   function shrinkPhoto(file) {
     return new Promise(function (resolve) {
@@ -416,6 +448,7 @@
       } catch (e) { finish(file); }
     });
   }
+  function errText(e) { return e instanceof TypeError ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e); }
   $('btn-generate').addEventListener('click', function () {
     if (generating) return;
     var file = $('gen-photo').files && $('gen-photo').files[0];
@@ -431,8 +464,185 @@
         return r.json().then(function (j) { return j && j.detail; }, function () { return null; })
           .then(function (d) { throw new Error(typeof d === 'string' && d ? d : 'Server error ' + r.status); });
       })
-      .catch(function (e) { setGenerating(false); msg(e instanceof TypeError ? 'Could not reach the server. It may be waking up; try again in a minute.' : String(e && e.message || e), true); });
+      .catch(function (e) { setGenerating(false); msg(errText(e), true); });
   });
+
+  // ---------- Slice for P1S (Render app only): POST api/slice, poll api/slice/<id>, download the .gcode.3mf ----------
+  var SLICE_POLL_MS = 3000, SLICE_GIVEUP_MS = 20 * 60 * 1000, SLICE_POLL_TIMEOUT_MS = 25000, JOB_KEY = 'image3d.slicejob';
+  var sliceReady = false, sliceLimit = 150000, sliceJob = null, sliceStale = false, sliceDoneJob = null, sliceOpts = null, sliceIncompat = [];
+  var SLICE_SELECTS = ['filament', 'quality', 'plate', 'supports'];
+  function passHeaders() { return { 'X-Passcode': $('gen-pass').value }; }
+  function savedJob(id) {
+    try { if (id === undefined) return sessionStorage.getItem(JOB_KEY); if (id) sessionStorage.setItem(JOB_KEY, id); else sessionStorage.removeItem(JOB_KEY); } catch (e) { /* storage blocked */ }
+    return null;
+  }
+  function sliceStatus(t) { $('slice-status').textContent = t || ''; }
+  function triangleCount() { var n = 0; state.model.forEach(function (sh) { n += sh.t.length / 3; }); return n; }
+  function updateSliceControls() {
+    if (!sliceReady) return;
+    var hint = '', off = false, n = triangleCount();
+    if (slicing) off = true;
+    else if (!state.model.length) { off = true; hint = 'Open a model to slice it.'; }
+    else if (n > sliceLimit) { off = true; hint = 'Model too detailed to slice here (' + n.toLocaleString('en-US') + ' triangles, limit ' + sliceLimit.toLocaleString('en-US') + ') - generate a lighter model'; }
+    else if (!state.model.every(M.isClosed)) hint = 'Model is not closed - slicing may fail';
+    $('btn-slice').disabled = off; $('slice-hint').textContent = hint;
+    SLICE_SELECTS.forEach(function (k) { $('slice-' + k).disabled = slicing; });
+    updateFloatWarning();
+  }
+  // supports off and a piece that starts more than 0.3 mm above the lowest point of the model: it would print in mid-air
+  function updateFloatWarning() {
+    var n = 0;
+    if (state.model.length > 1 && $('slice-supports').value === 'off') {
+      var low = M.bbox(state.model).min[2];
+      state.model.forEach(function (sh) { if (M.bbox([sh]).min[2] > low + 0.3) n++; });
+    }
+    $('slice-float').textContent = n ? n + ' piece(s) float above the bed - delete them or turn on Tree supports' : '';
+  }
+  // a plate the chosen filament cannot use (from the server's list) is disabled; a selected one moves to the first usable plate
+  function updatePlates() {
+    var fil = $('slice-filament').value, sel = $('slice-plate'), was = sel.value, moved = false;
+    [].forEach.call(sel.options, function (o) {
+      o.disabled = sliceIncompat.some(function (p) { return p[0] === fil && p[1] === o.value; });
+    });
+    if (sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
+      var ok = [].filter.call(sel.options, function (o) { return !o.disabled; })[0];
+      if (ok) { sel.value = ok.value; moved = true; }
+    }
+    if (moved) {
+      var wasLabel = [].filter.call(sel.options, function (o) { return o.value === was; })[0].textContent;
+      sliceStatus(wasLabel + ' is not available for Bambu ' + $('slice-filament').selectedOptions[0].textContent);
+    }
+  }
+  function hideSliceResult() {
+    $('slice-result').hidden = true;
+    if (sliceDoneJob) { sliceDoneJob = null; savedJob(null); }
+  }
+  function modelChanged() {
+    if (slicing) sliceStale = true;
+    hideSliceResult(); updateSliceControls();
+  }
+  function endSlice() { slicing = false; sliceJob = null; updateWake(); updateSliceControls(); }
+  function showSliceResult(id, s, earlier) {
+    var supportsOn = false;
+    ((sliceOpts && sliceOpts.supports) || []).forEach(function (o) { if (o.label === s.supports && o.id !== 'off') supportsOn = true; });
+    $('slice-line').textContent = (earlier ? 'Result from your earlier slice: ' : '') + 'Print time ' + s.print_time + ' · ' + fmt(s.filament_g) + ' g · ' + s.layers + ' layers · ' +
+      s.filament + ', ' + s.quality + ', ' + s.plate + (supportsOn ? ', tree supports' : '') +
+      (Array.isArray(s.size_mm) && s.size_mm.length === 3 ? ' · ' + s.size_mm.map(fmt).join(' x ') + ' mm' : '');
+    sliceDoneJob = id; $('btn-slice-download').disabled = false; $('slice-result').hidden = false;
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function detailFrom(status, body) {
+    var d = body && body.detail;
+    return typeof d === 'string' && d ? d : (status === 422 || Array.isArray(d)) ? 'Slice request was not accepted' : 'Server error ' + status;
+  }
+  function detailOf(r) {
+    return r.json().then(function (j) { return j; }, function () { return null; }).then(function (j) { return detailFrom(r.status, j); });
+  }
+  // one status request; headers and body must arrive within 25 s or it is aborted (the caller treats that as a hiccup)
+  async function pollOnce(id) {
+    var c = new AbortController(), t = setTimeout(function () { c.abort(); }, SLICE_POLL_TIMEOUT_MS);
+    try {
+      var r = await fetch('api/slice/' + encodeURIComponent(id), { headers: passHeaders(), signal: c.signal });
+      var body = null;
+      try { body = await r.json(); } catch (e) { if (r.ok) throw e; }
+      return { status: r.status, ok: r.ok, body: body };
+    } finally { clearTimeout(t); }
+  }
+  var NEED_PASS = 'Enter the passcode in the Generate section, then reload to get your slice';
+  // follows one job until it finishes; network errors, timeouts and 5xx answers keep it polling (the free server may be
+  // busy slicing). earlier: true when resuming a job saved before a reload.
+  async function pollSlice(id, earlier) {
+    var t0 = Date.now(), first = true;
+    while (sliceJob === id) {
+      if (!first) await sleep(SLICE_POLL_MS);
+      first = false;
+      if (sliceJob !== id) return;
+      if (Date.now() - t0 > SLICE_GIVEUP_MS) { endSlice(); savedJob(null); sliceStatus(''); msg('Gave up waiting for the slice after 20 minutes. Try again.', true); return; }
+      if (!$('gen-pass').value) { endSlice(); sliceStatus(''); msg(NEED_PASS, true); return; }   // never poll without a passcode; the job stays saved
+      var p;
+      try { p = await pollOnce(id); }
+      catch (e) { sliceStatus('Still working... (connection hiccup)'); continue; }
+      if (sliceJob !== id) return;
+      if (p.status === 401 || p.status === 403) { endSlice(); sliceStatus(''); msg(NEED_PASS, true); return; }
+      if (p.status === 404) { endSlice(); savedJob(null); sliceStatus(''); if (!earlier) msg('The slice expired or was lost. Slice again.', true); return; }
+      if (p.status >= 500) { sliceStatus('Still working... (connection hiccup)'); continue; }
+      if (!p.ok) { endSlice(); savedJob(null); sliceStatus(''); msg(detailFrom(p.status, p.body), true); return; }
+      var j = p.body || {};
+      if (j.state === 'done' && j.summary) {
+        var stale = sliceStale; endSlice(); sliceStatus('');
+        if (stale) { savedJob(null); msg('The model was edited while slicing, so that file no longer matches. Slice again.', true); }
+        else { showSliceResult(id, j.summary, earlier); msg('Slice ready.'); }
+        return;
+      }
+      if (j.state === 'failed' || j.state === 'done') { endSlice(); savedJob(null); sliceStatus(''); msg(j.detail || 'Slice failed', true); return; }
+      sliceStatus('Slicing... about 3 minutes on the free server; keep this screen open (' + (j.elapsed_s | 0) + 's)');
+    }
+  }
+  function beginSlice(id, earlier) {
+    slicing = true; sliceJob = id; updateWake(); updateSliceControls();
+    sliceStatus('Slicing... about 3 minutes on the free server; keep this screen open (0s)');
+    return pollSlice(id, earlier);
+  }
+  $('btn-slice').addEventListener('click', function () {
+    if (slicing || !sliceReady || !needModel()) return;
+    if (!$('gen-pass').value) { msg('Enter the passcode in the Generate section first', true); return; }
+    slicing = true; sliceStale = false; updateWake(); updateSliceControls(); hideSliceResult(); msg(''); sliceStatus('Sending the model...');
+    var fd = new FormData();
+    fd.append('model', new Blob([exportStl()], { type: 'model/stl' }), 'model.stl');
+    SLICE_SELECTS.forEach(function (k) { fd.append(k, $('slice-' + k).value); });
+    fetch('api/slice', { method: 'POST', headers: passHeaders(), body: fd })
+      .then(function (r) {
+        if (r.status === 202) return r.json().then(function (j) { savedJob(j.job); return beginSlice(j.job, false); });
+        return detailOf(r).then(function (d) { throw new Error(d); });
+      })
+      .catch(function (e) { endSlice(); sliceStatus(''); msg(errText(e), true); });
+  });
+  $('btn-slice-download').addEventListener('click', function () {
+    var id = sliceDoneJob, b = this;
+    if (!id) return;
+    b.disabled = true;
+    fetch('api/slice/' + encodeURIComponent(id) + '/file', { headers: passHeaders() })
+      .then(function (r) {
+        if (!r.ok) return detailOf(r).then(function (d) { throw new Error(d); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' })), a = document.createElement('a');
+        a.href = url; a.download = 'model.gcode.3mf'; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        msg('Saved model.gcode.3mf');
+      })
+      .catch(function (e) { msg(errText(e), true); })
+      .then(function () { b.disabled = false; });
+  });
+  // a person changing a setting makes the shown result (and its Download) stale; filling the lists in code does not
+  SLICE_SELECTS.forEach(function (k) {
+    $('slice-' + k).addEventListener('change', function () {
+      hideSliceResult();
+      if (k === 'filament') updatePlates();
+      updateFloatWarning();
+    });
+  });
+  // only after api/health answered: ask the server what it can slice
+  function loadSliceOptions() {
+    return fetch('api/slice/options').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || typeof j !== 'object') return;
+      $('slice-panel').hidden = false;
+      if (!j.available) { $('slice-unavailable').hidden = false; return; }
+      sliceOpts = j.options || {}; sliceIncompat = Array.isArray(j.incompatible) ? j.incompatible : []; sliceLimit = (j.limits && j.limits.max_triangles) || sliceLimit;
+      SLICE_SELECTS.forEach(function (k) {
+        var sel = $('slice-' + k); sel.textContent = '';
+        (sliceOpts[k] || []).forEach(function (o) { var e = document.createElement('option'); e.value = o.id; e.textContent = o.label; sel.appendChild(e); });
+      });
+      updatePlates(); sliceStatus('');
+      $('slice-form').hidden = false; sliceReady = true; updateSliceControls();
+      var id = savedJob();
+      if (id && !slicing) {
+        sliceStale = state.model.length > 0;   // a model is already open: the saved file may not be for it, so it is discarded
+        beginSlice(id, true).catch(function (e) { endSlice(); sliceStatus(''); msg(errText(e), true); });
+      }
+    }).catch(function () { /* no slice panel */ });
+  }
 
   initView();
   refresh();

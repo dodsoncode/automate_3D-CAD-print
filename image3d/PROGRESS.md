@@ -7,8 +7,9 @@ Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-too
 ## Where it stands
 
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
+- **Slice for P1S, final fix wave (2026-11-12):** PETG HF + Cool Plate refused; G-code checks for bed heat, exact filament and the excluded bed corner; plain overhang and out-of-memory messages; engine run with a memory/time watchdog; leaner STL handling; install step that proves the engine with a test slice; page fixes (stale results, resume, passcode, poll timeout, floating-piece warning, incompatible plates, size in the result line). Verified with the real engine in Claude's workspace and with a fake slicer in a desktop browser. NOT verified: Render, a real phone, any print.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
-- **Waiting on Jacob:** TI6 (try the editor on the phone) and TI7 (Hugging Face token + Render deploy).
+- **Waiting on Jacob:** nothing for TI6 / TI7: he reported on 2026-11-12 that the Render deploy and the phone editor work well. Open now: SL4 (redeploy for the slicer), SL5 (first test print), SL3 (FTPS upload test).
 - **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
 - **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
   Claude app.
@@ -135,14 +136,32 @@ second **free Render** service next to the mental fitness app.
 - Jacob asked for the merge; PR #9 merged to `main` (c91f2fa). `main` now has the cut fix and the lighter-model
   setting, so a Render Blueprint from `main` gets both.
 
+### Step 17 - Render deploy and phone confirmed (2026-11-12)
+- Jacob deployed the Render service and reported it "works well" on his phone (TI6, TI7). This is the first real-device confirmation for the editor and for generation through Render. Details of what he tried are not recorded.
+
+### Step 18 - Slice for P1S: feasibility spike (2026-11-12)
+- The OrcaSlicer engine (npm `orcaslicer-addon`, stock Bambu profiles) sliced a 105k-triangle test model for P1S 0.4 nozzle / PLA Basic / textured PEI into a valid `.gcode.3mf` in about 17 CPU-seconds and about 300 MB. Sending from a cloud server to the printer is not possible; third-party start-print needs LAN-only + Developer Mode, which loses Handy. Write-up: `../docs/2026-11-12-slice-send-feasibility.md`. Script-checked in Claude's workspace only; nothing printed.
+
+### Step 19 - Slice for P1S: design, spec and plan (2026-11-12)
+- Jacob chose to build "Slice for P1S" on the free Render instance and keep Handy, with PLA Basic and PLA Silk+ among the filaments. Spec `../docs/superpowers/specs/2026-11-12-p1s-slicing-design.md`, plan `../docs/superpowers/plans/2026-11-12-p1s-slicing.md` (4 tasks). Spike findings: the engine does not centre an STL (the server moves the model to the middle of the bed) and engine options must be strings.
+
+### Step 20 - Slice for P1S Tasks 1-3 (2026-11-12)
+- Task 1, slicer core (`slicing.py`, `slicer/`): three review rounds hardened the model check and the fail-closed G-code check; `test_slicing.py` 112 passed, real-engine slices run. Script-checked.
+- Task 2, server job API (`/api/slice` routes, passcode guard, one slice at a time, 30-minute keep): tested with a fake slicer, 63 server tests passed. Review found no important issues.
+- Task 3, "Slice for P1S" panel on the page: desktop browser at phone size with a fake slicer, 242 `image3d` tests passed. Review found no important issues.
+- Minor items left for the final review are listed in the root `../PROGRESS.md`.
+
+### Step 21 - Slice for P1S Task 4: deploy wiring, docs, real run (2026-11-12)
+- `render.yaml` build command now also runs `bash slicer/install.sh` (it always exits 0, so a slicer install failure cannot fail the deploy). Docs: `PRINTING.md` (new), `DEPLOY.md` (Updating to get the slicer), this README.
+- Real end-to-end run through the real server with the real engine (`tests/e2e_slice.py`, Claude's workspace, 2 CPU cores): `two_cubes.stl` 2.0 s; a 124,500-triangle bumpy sphere 15.6 s, 3.1 MB file; the same model through `slicing.run_slice` alone 14.0 s, peak 368 MB (engine) + 98 MB (Python). Both results passed the G-code check.
+- NOT verified: the slicer on Render (the free instance has 0.1 CPU and 512 MB, so expect about 3 minutes by estimate and watch memory), a real phone for the slice section, any print.
+
 ## What Jacob does next
 
-1. **TI6 - try the editor (no setup):** open the "Image3D editor" artifact on the phone. Make a model on the
-   Hunyuan3D Space page in the phone browser, download the GLB, open it in the editor, delete a piece, set the
-   size, export. Report anything that does not work.
-2. **TI7 - one-link generation (about 15 minutes):** follow [`DEPLOY.md`](DEPLOY.md): free Hugging Face token,
-   then Render > New > Blueprint > this repo, set `HF_TOKEN` and `IMAGE3D_PASSCODE`. The PR is merged, so use branch `main`.
-3. Report the first real photo-to-model result. That is the first true test of generation.
+1. **SL4 - get the slicer:** after the Slice for P1S PR is merged, redeploy on Render and follow "Updating to get the slicer" in [`DEPLOY.md`](DEPLOY.md).
+2. **SL5 - first test print:** a small model, watched, following [`PRINTING.md`](PRINTING.md).
+3. **SL3 (optional):** try the FTPS upload once and report whether it works on your printer.
+(TI6 and TI7 are done: reported working on 2026-11-12.)
 
 ## How to run the tests
 

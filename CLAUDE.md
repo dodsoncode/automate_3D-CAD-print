@@ -14,5 +14,6 @@ ESP32 walking robot. Read `PLAN.md` (big picture), `TASKS.md` (open work) and `P
 ## Workflow
 
 - Work on a branch, open a PR to `main`; merge only when Jacob asks.
+- Do not open a PR just to log a merge: put the merge's `PROGRESS.md` entry in the next working PR.
 - Python 3; the 3MF writer has no dependencies. Firmware tests: `cd firmware && python -m pytest -q`.
 - Never commit `printer/bambu_config.json` (printer access code) or `firmware/src/calib.json`.
