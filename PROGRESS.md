@@ -377,3 +377,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Substep (controller): the REAL page at phone size against the REAL server and REAL engine: opened a model, PETG HF greyed out the Cool Plate, sliced with PLA Silk+ (3.3 s for a 20 mm cube here), result line "Print time 13m 39s - 3.8 g - 100 layers - PLA Silk+, 0.20 mm Standard, Textured PEI - 20 x 20 x 20 mm", downloaded `model.gcode.3mf`, and the downloaded file passed `check_gcode` again.
 - Verification level: real engine and real server in Claude's workspace; desktop browser at phone size. NOT verified: the slicer installing or running on Render (first deploy is the test), a real phone, any print, FTPS upload to the printer.
 - NEXT: PR to `main`. Jacob: SL4 (merge, redeploy, check `/api/slice/options` says available), SL5 (first small watched print), SL3 (try the FTPS upload once).
+
+### 2026-11-12 - P1S slicing: PR #11 opened
+- DONE: branch `slice-send` pushed; PR #11 opened to `main` ("Image3D: Slice for P1S"). Not merged; waits for Jacob. The PR also carries the merge-log note for PR #10 and the CLAUDE.md workflow line.
+- NEXT: Jacob - say when to merge; then SL4, SL5, SL3.
+- BLOCKED: nothing for Claude.
