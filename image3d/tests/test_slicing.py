@@ -615,15 +615,24 @@ def test_engine_runs_niced_with_output_in_a_log_file(monkeypatch, tmp_path):
     kw = FakePopen.instances[0].kw
     assert kw["cwd"] == slicing.SLICER_DIR and kw["stderr"] == subprocess.STDOUT
     assert kw["stdout"].name == str(tmp_path / "engine.log")      # a file, not a pipe
-    assert kw["preexec_fn"] is slicing._lower_priority
+    assert "preexec_fn" not in kw
     assert 'RESULT {"ok":true}' in (tmp_path / "engine.log").read_text()
 
 
-def test_lower_priority_survives_a_failing_nice(monkeypatch):
-    def boom(n):
-        raise OSError("no")
-    monkeypatch.setattr(slicing.os, "nice", boom)
-    slicing._lower_priority()
+def test_engine_command_is_niced_when_nice_exists(monkeypatch, tmp_path):
+    fake_zip_run(monkeypatch, gcode())
+    monkeypatch.setattr(slicing.shutil, "which", lambda name: "/usr/bin/nice" if name == "nice" else None)
+    slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    cmd = FakePopen.instances[0].cmd
+    assert cmd[:4] == ["/usr/bin/nice", "-n", "10", slicing.node_path()] and cmd[4].endswith("slice_job.js")
+
+
+def test_engine_command_runs_node_directly_without_nice(monkeypatch, tmp_path):
+    fake_zip_run(monkeypatch, gcode())
+    monkeypatch.setattr(slicing.shutil, "which", lambda name: None)
+    slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    cmd = FakePopen.instances[0].cmd
+    assert cmd[0] == slicing.node_path() and cmd[1].endswith("slice_job.js")
 
 
 def test_memory_kill_from_the_cgroup_total(monkeypatch, tmp_path):
@@ -657,6 +666,89 @@ def test_rss_fallback_without_a_cgroup_limit(monkeypatch, tmp_path):
     assert slicing.memory_exceeded(4242) is False
     monkeypatch.setenv("SLICE_MEM_LIMIT_MB", "350")
     assert slicing.memory_exceeded(4242) is True
+
+
+# ---------- F1: the watchdog never leaves the engine running ----------
+@pytest.mark.parametrize("exc,expect_slice_error", [(RuntimeError("reader broke"), False), (MemoryError(), False),
+                                                    (OSError("proc vanished"), False)])
+def test_exception_in_the_wait_loop_kills_the_engine(monkeypatch, tmp_path, exc, expect_slice_error):
+    fake_engine(monkeypatch, hang=True, write_output=True)
+
+    def boom():
+        raise exc
+    monkeypatch.setattr(slicing, "read_cgroup_memory", boom)
+    with pytest.raises(type(exc)) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path), timeout=30)
+    assert e.value is exc
+    assert "could not be started" not in str(e.value)       # an OSError from the watchdog is not a start failure
+    assert FakePopen.instances[0].killed and FakePopen.instances[0].returncode is not None   # killed and reaped
+    assert not os.path.exists(tmp_path / "model.gcode.3mf")
+
+
+def test_start_failure_is_still_reported_as_could_not_be_started(monkeypatch, tmp_path):
+    def nope(*a, **k):
+        raise FileNotFoundError("node")
+    monkeypatch.setattr(slicing.subprocess, "Popen", nope)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    assert e.value.status == 500 and "could not be started" in str(e.value)
+
+
+# ---------- F2: working set, not page cache ----------
+real_read_cgroup = slicing.read_cgroup_memory
+def cgroup_files(tmp_path, monkeypatch, current, mx, inactive=None):
+    mb = 1048576
+    monkeypatch.setattr(slicing, "CGROUP_DIR", str(tmp_path))
+    (tmp_path / "memory.max").write_text(mx if isinstance(mx, str) else str(mx * mb))
+    (tmp_path / "memory.current").write_text(str(current * mb))
+    if inactive is not None:
+        (tmp_path / "memory.stat").write_text("anon 1\nfile 2\ninactive_file %d\nactive_file 5\n" % (inactive * mb))
+
+
+def test_page_cache_is_not_counted_against_the_engine(monkeypatch, tmp_path):
+    cgroup_files(tmp_path, monkeypatch, 500, 512, inactive=150)      # working set 350 MB
+    assert slicing.memory_exceeded(1) is False
+
+
+def test_real_memory_use_near_the_limit_is_killed_with_413(monkeypatch, tmp_path):
+    cg, work = tmp_path / "cg", tmp_path / "work"
+    cg.mkdir()
+    work.mkdir()
+    cgroup_files(cg, monkeypatch, 500, 512, inactive=5)              # working set 495 MB
+    assert slicing.memory_exceeded(1) is True
+    fake_engine(monkeypatch, hang=True)
+    monkeypatch.setattr(slicing, "read_cgroup_memory", real_read_cgroup)   # fake_engine replaced it with a stub
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(work), timeout=30)
+    assert e.value.status == 413 and "out of memory" in str(e.value) and FakePopen.instances[0].killed
+
+
+def test_unreadable_memory_stat_falls_back_to_memory_current(monkeypatch, tmp_path):
+    cgroup_files(tmp_path, monkeypatch, 500, 512)                    # no memory.stat
+    assert slicing.memory_exceeded(1) is True
+    (tmp_path / "memory.stat").write_text("garbage without the key\n")
+    assert slicing.memory_exceeded(1) is True
+    (tmp_path / "memory.stat").write_text("inactive_file notanumber\n")
+    assert slicing.memory_exceeded(1) is True
+    cgroup_files(tmp_path, monkeypatch, 400, 512)
+    assert slicing.memory_exceeded(1) is False
+
+
+def test_cgroup_max_means_unlimited_uses_the_rss_fallback(monkeypatch, tmp_path):
+    cgroup_files(tmp_path, monkeypatch, 500, "max", inactive=0)
+    assert slicing.read_cgroup_memory() is None
+    mb = 1048576
+    rss = {77: 300 * mb, None: 100 * mb}
+    monkeypatch.setattr(slicing, "read_rss", lambda pid: rss[pid])
+    assert slicing.memory_exceeded(77) is False
+    rss[77] = 400 * mb
+    assert slicing.memory_exceeded(77) is True
+
+
+def test_cgroup_reader_returns_the_working_set(monkeypatch, tmp_path):
+    cgroup_files(tmp_path, monkeypatch, 500, 512, inactive=150)
+    mb = 1048576
+    assert slicing.read_cgroup_memory() == (350 * mb, 512 * mb)
 
 
 def test_cgroup_reader(monkeypatch, tmp_path):

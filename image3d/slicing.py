@@ -447,16 +447,31 @@ def _env_mb(name, default):
 
 
 def read_cgroup_memory():
-    """(current bytes, max bytes) of this container's cgroup, or None when it is unknown or unlimited."""
+    """(working-set bytes, max bytes) of this container's cgroup, or None when it is unknown or unlimited. The working
+    set is memory.current minus the reclaimable page cache (inactive_file), as Kubernetes counts it; memory.current
+    alone when memory.stat cannot be read."""
     try:
         with open(os.path.join(CGROUP_DIR, "memory.max")) as f:
             raw = f.read().strip()
         if not raw.isdigit():
             return None
         with open(os.path.join(CGROUP_DIR, "memory.current")) as f:
-            return int(f.read().strip()), int(raw)
+            current = int(f.read().strip())
+        return max(0, current - _inactive_file()), int(raw)
     except (OSError, ValueError):
         return None
+
+
+def _inactive_file():
+    """Reclaimable page cache (memory.stat inactive_file) in bytes; 0 when memory.stat cannot be read."""
+    try:
+        with open(os.path.join(CGROUP_DIR, "memory.stat")) as f:
+            for ln in f:
+                if ln.startswith("inactive_file "):
+                    return int(ln.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
 
 
 def read_rss(pid):
@@ -478,13 +493,6 @@ def memory_exceeded(pid):
     if cg is not None:
         return cg[0] > cg[1] - _env_mb("SLICE_MEM_MARGIN_MB", 40) * 1048576
     return read_rss(pid) + read_rss(None) > _env_mb("SLICE_MEM_LIMIT_MB", 470) * 1048576
-
-
-def _lower_priority():
-    try:
-        os.nice(10)
-    except Exception:
-        pass
 
 
 def _log_tail(path, size=256 * 1024):
@@ -537,14 +545,21 @@ def run_slice(stl, choice, workdir, timeout=TIMEOUT_S, prepared=None):
         json.dump(settings, f)
     _remove(out)
     try:
-        try:
-            with open(log_path, "wb") as logf:
-                proc = subprocess.Popen([node_path(), os.path.join(SLICER_DIR, "slice_job.js"), src, out, cfg_path],
-                                        cwd=SLICER_DIR, stdout=logf, stderr=subprocess.STDOUT,
-                                        preexec_fn=_lower_priority)
+        cmd = [node_path(), os.path.join(SLICER_DIR, "slice_job.js"), src, out, cfg_path]
+        nice = shutil.which("nice")
+        if nice:                         # lower priority without preexec_fn (unsafe in a threaded server)
+            cmd = [nice, "-n", "10"] + cmd
+        with open(log_path, "wb") as logf:
+            try:
+                proc = subprocess.Popen(cmd, cwd=SLICER_DIR, stdout=logf, stderr=subprocess.STDOUT)
+            except OSError as e:
+                raise SliceError(500, "the slicer could not be started: %s" % e)
+            try:
                 _wait_for_engine(proc, timeout)
-        except OSError as e:
-            raise SliceError(500, "the slicer could not be started: %s" % e)
+            except BaseException:        # whatever goes wrong while watching, the engine must not keep running
+                proc.kill()
+                proc.wait()
+                raise
         output = _log_tail(log_path)
         result = None
         for ln in reversed(output.splitlines()):
