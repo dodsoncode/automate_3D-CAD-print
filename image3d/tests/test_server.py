@@ -417,6 +417,7 @@ def test_chunked_body_over_cap_via_client(client):
 
 # ---------- Slice for P1S: job API with a FAKE slicer ----------
 import struct  # noqa: E402
+import tempfile  # noqa: E402
 import threading  # noqa: E402
 import zipfile  # noqa: E402
 
@@ -453,8 +454,9 @@ class FakeSlicer:
         self.error = None     # an exception to raise instead of finishing
         self.dirs = []
 
-    def __call__(self, stl, choice, workdir):
+    def __call__(self, stl, choice, workdir, prepared=None):
         self.calls.append((stl, choice))
+        self.prepared = prepared
         self.dirs.append(workdir)
         if self.gate is not None:
             assert self.gate.wait(10)
@@ -570,7 +572,8 @@ def test_slice_happy_path(client, slicer):
 def test_slice_passes_choice_to_slicer(client, slicer):
     start_and_finish(client, filament="petg_hf", quality="fine", plate="smooth_pei", supports="tree")
     stl, choice = slicer.calls[0]
-    assert stl == STL
+    assert stl == slicing.prepare_stl(STL)[0]            # the job gets the prepared bytes ...
+    assert slicer.prepared == slicing.prepare_stl(STL)[1]  # ... and their info, so nothing is parsed twice
     assert choice == {"filament": "petg_hf", "quality": "fine", "plate": "smooth_pei", "supports": "tree"}
 
 
@@ -627,20 +630,80 @@ def test_any_exception_fails_the_job_and_detail_is_capped(client, slicer):
     assert len(client.get("/api/slice/" + job, headers=auth()).json()["detail"]) <= 300
 
 
-def test_running_job_past_the_timeout_is_reported_failed(client, slicer, monkeypatch):
+def test_running_job_is_not_failed_by_the_old_fixed_rule(client, slicer, monkeypatch):
     clock = Clock()
     monkeypatch.setattr(server, "CLOCK", clock)
     slicer.gate = threading.Event()
     job = slice_post(client).json()["job"]
-    clock.t += slicing.TIMEOUT_S + 30  # inside the margin: still running
+    clock.t += slicing.TIMEOUT_S + 600     # well past the old 960 s rule, the thread is alive
     assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "running"
-    clock.t += 31
+    assert slice_post(client).status_code == 409
+
+
+def test_stuck_job_after_the_absolute_cap_blocks_new_slices_while_its_thread_lives(client, slicer, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(server, "CLOCK", clock)
+    slicer.gate = threading.Event()
+    job = slice_post(client).json()["job"]
+    clock.t += server.JOB_ABSOLUTE_CAP_S - 1
+    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "running"
+    clock.t += 2
     body = client.get("/api/slice/" + job, headers=auth()).json()
-    assert body["state"] == "failed" and "timed out" in body["detail"]
+    assert body["state"] == "failed" and body["detail"] == "the slice stopped responding; restart the service if this persists"
+    r = slice_post(client)
+    assert r.status_code == 409 and r.json() == {"detail": "a slice is already running"}   # thread still alive
+    clock.t += server.JOB_KEEP_S + 1
+    assert client.get("/api/slice/" + job, headers=auth()).status_code == 200      # not dropped while its thread lives
     slicer.gate.set()
     finish()
-    assert client.get("/api/slice/" + job, headers=auth()).json()["state"] == "failed"  # a late finish changes nothing
-    assert slice_post(client).status_code == 202  # and a new slice may start
+    assert client.get("/api/slice/%s/file" % job, headers=auth()).status_code in (404, 409)  # a late finish is no result
+    assert slice_post(client).status_code == 202
+
+
+def test_job_whose_thread_died_without_finishing_is_failed_and_does_not_block(client, slicer):
+    dead = threading.Thread(target=lambda: None)
+    dead.start()
+    dead.join()
+    server._jobs["dead1"] = {"id": "dead1", "state": "running", "detail": "", "summary": None, "path": None,
+                             "dir": tempfile.mkdtemp(prefix="slice-"), "started": server.CLOCK(), "finished": None,
+                             "thread": dead}
+    body = client.get("/api/slice/dead1", headers=auth()).json()
+    assert body["state"] == "failed" and "stopped unexpectedly" in body["detail"]
+    assert slice_post(client).status_code == 202
+
+
+def test_directory_or_thread_failure_answers_500_and_leaves_nothing(client, slicer, monkeypatch):
+    made = []
+    real = tempfile.mkdtemp
+
+    def mk(*a, **k):
+        made.append(real(*a, **k))
+        return made[-1]
+    monkeypatch.setattr(server.tempfile, "mkdtemp", mk)
+
+    class Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(server.threading, "Thread", Boom)
+    r = slice_post(client)
+    assert r.status_code == 500 and r.json() == {"detail": "could not start the slice"}
+    assert server._jobs == {} and made and not os.path.exists(made[0])
+    monkeypatch.setattr(server.tempfile, "mkdtemp", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    r = slice_post(client)
+    assert r.status_code == 500 and r.json() == {"detail": "could not start the slice"} and server._jobs == {}
+
+
+def test_options_list_the_incompatible_pairs(client, slicer):
+    assert client.get("/api/slice/options").json()["incompatible"] == [["petg_hf", "cool"]]
+
+
+def test_file_route_sends_the_bytes_even_if_the_folder_goes_away(client, slicer):
+    job = start_and_finish(client)
+    r = client.get("/api/slice/%s/file" % job, headers=auth())
+    assert r.status_code == 200 and r.content == slicer.bytes and not isinstance(r, server.FileResponse)
 
 
 @pytest.mark.parametrize("data, status", [

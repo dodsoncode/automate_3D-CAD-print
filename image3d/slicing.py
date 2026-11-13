@@ -12,6 +12,7 @@ import re
 import struct
 import shutil
 import subprocess
+import time
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -94,9 +95,13 @@ def available():
 
 
 # ---------- STL ----------
+_CHUNK = 2000   # records per struct call: a few hundred KB of temporary floats, not one Python object per vertex
+
+
 def prepare_stl(data):
     """Checks a binary STL and moves it to the middle of the bed (XY centre 128, 128) with its lowest point at z = 0
-    (the engine does not centre the model itself). Returns (stl bytes, {"triangles", "size_mm"})."""
+    (the engine does not centre the model itself). Returns (stl bytes, {"triangles", "size_mm"}).
+    Memory-lean: two passes over the records in chunks, the translated copy is built in one bytearray."""
     if len(data) < 84:
         raise SliceError(400, "not a binary STL file")
     n = struct.unpack_from("<I", data, 80)[0]
@@ -106,31 +111,36 @@ def prepare_stl(data):
         raise SliceError(400, "the STL has no triangles")
     if n > MAX_TRIANGLES:
         raise SliceError(413, "model has %d triangles; the limit is %d" % (n, MAX_TRIANGLES))
-    rows = list(struct.iter_unpack("<12fH", memoryview(data)[84:84 + 50 * n]))
-    # NaN never wins a min/max comparison, so every vertex is tested (the sum is non-finite if any coordinate is)
-    if not all(math.isfinite(sum(r[3:12])) for r in rows):
-        raise SliceError(400, "the STL contains invalid coordinates")
+    view = memoryview(data)
+    full = struct.Struct("<" + "12fH" * _CHUNK)
     lo, hi = [math.inf] * 3, [-math.inf] * 3
-    for r in rows:
-        for v in (3, 6, 9):
-            for a in range(3):
-                c = r[v + a]
-                if c < lo[a]:
-                    lo[a] = c
-                if c > hi[a]:
-                    hi[a] = c
+    chunks = []          # (first record, record count, Struct)
+    for first in range(0, n, _CHUNK):
+        count = min(_CHUNK, n - first)
+        chunks.append((first, count, full if count == _CHUNK else struct.Struct("<" + "12fH" * count)))
+    for first, count, st in chunks:
+        vals = st.unpack_from(view, 84 + 50 * first)
+        for a in range(3):
+            col = vals[3 + a::13] + vals[6 + a::13] + vals[9 + a::13]
+            # NaN never wins a min/max comparison, but it makes the sum non-finite (so does an infinity)
+            if not math.isfinite(sum(col)):
+                raise SliceError(400, "the STL contains invalid coordinates")
+            lo[a] = min(lo[a], min(col))
+            hi[a] = max(hi[a], max(col))
     size = [hi[a] - lo[a] for a in range(3)]
     if max(size) > BED_MM:
         raise SliceError(400, "model is %.0f x %.0f x %.0f mm and does not fit the %d mm bed" % (*size, BED_MM))
     shift = (BED_MM / 2 - (lo[0] + hi[0]) / 2, BED_MM / 2 - (lo[1] + hi[1]) / 2, -lo[2])
-    out = bytearray(data[:84])
-    pack = struct.Struct("<12fH").pack
-    for r in rows:
-        v = list(r)
-        for k in (3, 6, 9):
-            for a in range(3):
-                v[k + a] += shift[a]
-        out += pack(*v)
+    out = bytearray(84 + 50 * n)
+    out[:84] = view[:84]
+    for first, count, st in chunks:
+        off = 84 + 50 * first
+        vals = list(st.unpack_from(view, off))
+        for a in range(3):
+            for v in (3, 6, 9):
+                vals[v + a::13] = [c + shift[a] for c in vals[v + a::13]]
+        st.pack_into(out, off, *vals)
+        del vals
     return bytes(out), {"triangles": n, "size_mm": [round(s, 2) for s in size]}
 
 
@@ -404,31 +414,122 @@ def _engine_failure(output, choice):
     return SliceError(500, "slicer failed: " + output[-ENGINE_TAIL:])
 
 
-def run_slice(stl, choice, workdir, timeout=TIMEOUT_S):
+# ---------- watchdog readers (module-level so the tests can replace them) ----------
+POLL_S = 1.0
+CGROUP_DIR = "/sys/fs/cgroup"
+MEM_OUT = ("This model is too large to slice on this server (out of memory). Try a smaller or shorter model, "
+           "0.28 mm Extra Draft, or supports off.")
+
+
+def _env_mb(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return float(default)
+
+
+def read_cgroup_memory():
+    """(current bytes, max bytes) of this container's cgroup, or None when it is unknown or unlimited."""
+    try:
+        with open(os.path.join(CGROUP_DIR, "memory.max")) as f:
+            raw = f.read().strip()
+        if not raw.isdigit():
+            return None
+        with open(os.path.join(CGROUP_DIR, "memory.current")) as f:
+            return int(f.read().strip()), int(raw)
+    except (OSError, ValueError):
+        return None
+
+
+def read_rss(pid):
+    """Resident memory in bytes of a process (pid None = this process), or 0 when it cannot be read."""
+    try:
+        with open("/proc/%s/status" % (pid or "self")) as f:
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    return int(ln.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
+def memory_exceeded(pid):
+    """True when the engine (pid) has used up the memory this container may have. Prefers the cgroup total;
+    otherwise engine RSS + this process's RSS against SLICE_MEM_LIMIT_MB."""
+    cg = read_cgroup_memory()
+    if cg is not None:
+        return cg[0] > cg[1] - _env_mb("SLICE_MEM_MARGIN_MB", 40) * 1048576
+    return read_rss(pid) + read_rss(None) > _env_mb("SLICE_MEM_LIMIT_MB", 470) * 1048576
+
+
+def _lower_priority():
+    try:
+        os.nice(10)
+    except Exception:
+        pass
+
+
+def _log_tail(path, size=256 * 1024):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - size))
+            return f.read().decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+
+
+def _wait_for_engine(proc, timeout):
+    """Polls the engine about once a second; kills it when it goes over the time or memory limit."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            proc.wait(timeout=POLL_S)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        reason = None
+        if time.monotonic() >= deadline:
+            reason = SliceError(500, "slicing stopped: it went over the %d s time limit" % timeout)
+        elif memory_exceeded(proc.pid):
+            reason = SliceError(413, MEM_OUT)
+        if reason is not None:
+            proc.kill()
+            proc.wait()
+            raise reason
+
+
+def run_slice(stl, choice, workdir, timeout=TIMEOUT_S, prepared=None):
     """Slices an uploaded binary STL. Returns (path of workdir/model.gcode.3mf, summary). Raises SliceError;
-    the output file never survives a failure."""
-    prepared, info = prepare_stl(stl)
+    the output file never survives a failure. prepared: the info dict from prepare_stl when stl is already its
+    prepared output (the server validates first), so the STL is not parsed twice."""
     settings = settings_for(choice)
+    if prepared:
+        info = prepared
+    else:
+        stl, info = prepare_stl(stl)
     src = os.path.join(workdir, "model.stl")
     out = os.path.join(workdir, OUTPUT_NAME)
     cfg_path = os.path.join(workdir, "settings.json")
+    log_path = os.path.join(workdir, "engine.log")
     with open(src, "wb") as f:
-        f.write(prepared)
+        f.write(stl)
+    del stl          # the engine is the big process: do not keep the STL in this one while it runs
     with open(cfg_path, "w") as f:
         json.dump(settings, f)
     _remove(out)
     try:
         try:
-            proc = subprocess.run([node_path(), os.path.join(SLICER_DIR, "slice_job.js"), src, out, cfg_path],
-                                  cwd=SLICER_DIR, capture_output=True, text=True, errors="replace", timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise SliceError(500, "slicing stopped: it went over the %d s time limit" % timeout)
+            with open(log_path, "wb") as logf:
+                proc = subprocess.Popen([node_path(), os.path.join(SLICER_DIR, "slice_job.js"), src, out, cfg_path],
+                                        cwd=SLICER_DIR, stdout=logf, stderr=subprocess.STDOUT,
+                                        preexec_fn=_lower_priority)
+                _wait_for_engine(proc, timeout)
         except OSError as e:
             raise SliceError(500, "the slicer could not be started: %s" % e)
-        # stderr first so the RESULT line (last line of stdout) stays at the end
-        output = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        output = _log_tail(log_path)
         result = None
-        for ln in reversed((proc.stdout or "").splitlines()):
+        for ln in reversed(output.splitlines()):
             if ln.startswith("RESULT "):
                 try:
                     result = json.loads(ln[7:])

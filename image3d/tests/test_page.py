@@ -286,7 +286,7 @@ def ctl():
         return json.load(open(os.environ['SLICE_CTL']))
     except Exception:
         return {}
-def fake_slicer(stl, choice, workdir):
+def fake_slicer(stl, choice, workdir, prepared=None):
     time.sleep(0.5)
     c = ctl()
     json.dump(choice, open(os.environ['SLICE_REC'], 'w'))

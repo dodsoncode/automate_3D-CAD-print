@@ -41,5 +41,7 @@ The "Slice for P1S" section comes with a new build step (`bash slicer/install.sh
   - `HF_API_NAME`: the endpoint name from the Space page ("Use via API"), for example `/shape_generation`. Setting it to an empty value makes the server guess an endpoint, which is a fallback and is not reliable.
   - `HF_IMAGE_PARAM`: the name of the endpoint's photo input (default `image`).
   - `HF_EXTRA_JSON`: extra settings for the call, as a JSON object. For another Space set it to `{}` unless you know its settings.
+  - `SLICE_MEM_MARGIN_MB` (default 40): the slicer is stopped with "out of memory" when the container's memory use gets within this many MB of its limit (read from the cgroup files `memory.current` and `memory.max`).
+  - `SLICE_MEM_LIMIT_MB` (default 470): used only when those cgroup files are not available: the slicer is stopped when its memory plus the web server's exceeds this many MB.
   A different Space may need code changes if its inputs or outputs differ. Only the default Space has been run for real.
 - Model too heavy or too coarse: detail is set by `HF_EXTRA_JSON` in Render (Environment). The default `{"octree_resolution": 128}` gives about 115,000 triangles. `96` gives about 55,000 (faster on the phone, less detail); `256` gives about 900,000 (too heavy for a phone).

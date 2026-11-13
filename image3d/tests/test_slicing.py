@@ -6,6 +6,7 @@ import os
 import struct
 import subprocess
 import sys
+import time
 import zipfile
 
 import pytest
@@ -402,12 +403,11 @@ def test_check_gcode_filament_must_match_exactly():
 
 
 def zip_run(monkeypatch, tmp_path, entries):
-    def run(cmd, **kw):
+    def on_start(cmd, kw):
         with zipfile.ZipFile(cmd[-2], "w") as z:
             for name, data in entries.items():
                 z.writestr(name, data)
-        return subprocess.CompletedProcess([], 0, stdout='RESULT {"ok":true}\n', stderr="")
-    monkeypatch.setattr(slicing.subprocess, "run", run)
+    fake_engine(monkeypatch, on_start=on_start, log='RESULT {"ok":true}\n')
     return slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
 
 
@@ -501,14 +501,59 @@ def test_other_engine_failures_keep_the_generic_message(monkeypatch, tmp_path, c
 
 
 # ---------- run_slice with a faked engine ----------
-def fake_run(monkeypatch, result=None, raises=None, write_output=False):
-    def run(cmd, **kw):
-        if write_output:
+class FakePopen:
+    """Stands in for subprocess.Popen: writes `log` to the stdout file it is given, can write the output file,
+    exits at once with `returncode`, or never exits (hang) until kill() is called."""
+    instances = []
+    spec = {}
+
+    def __init__(self, cmd, **kw):
+        spec = FakePopen.spec
+        self.cmd, self.kw = cmd, kw
+        self.pid = 4242
+        self.returncode = None
+        self.killed = False
+        self.hang = spec.get("hang", False)
+        kw["stdout"].write(spec.get("log", "").encode())
+        kw["stdout"].flush()
+        if spec.get("write_output"):
             open(cmd[-2], "wb").write(b"partial")
-        if raises:
-            raise raises
-        return result
-    monkeypatch.setattr(slicing.subprocess, "run", run)
+        if spec.get("on_start"):
+            spec["on_start"](cmd, kw)
+        self.exit_code = spec.get("returncode", 0)
+        FakePopen.instances.append(self)
+
+    def wait(self, timeout=None):
+        if self.hang and not self.killed:
+            time.sleep(min(timeout or 0, 0.02))
+            raise subprocess.TimeoutExpired(self.cmd, timeout)
+        self.returncode = -9 if self.killed else self.exit_code
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+
+
+def fake_engine(monkeypatch, **spec):
+    FakePopen.instances = []
+    FakePopen.spec = spec
+    monkeypatch.setattr(slicing.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(slicing, "POLL_S", 0.01)
+    monkeypatch.setattr(slicing, "read_cgroup_memory", lambda: None)
+    monkeypatch.setattr(slicing, "read_rss", lambda pid: 0)
+
+
+def fake_run(monkeypatch, result=None, write_output=False):
+    """result: a subprocess.CompletedProcess describing the engine's exit code and output."""
+    fake_engine(monkeypatch, returncode=result.returncode, log=(result.stderr or "") + (result.stdout or ""),
+                write_output=write_output)
+
+
+def fake_zip_run(monkeypatch, gcode_text, **kw):
+    def on_start(cmd, kw_):
+        with zipfile.ZipFile(cmd[-2], "w") as z:
+            z.writestr("Metadata/plate_1.gcode", gcode_text)
+    fake_engine(monkeypatch, on_start=on_start, log='RESULT {"ok":true}\n', **kw)
 
 
 def test_run_slice_engine_failure(monkeypatch, tmp_path):
@@ -521,10 +566,11 @@ def test_run_slice_engine_failure(monkeypatch, tmp_path):
 
 
 def test_run_slice_timeout(monkeypatch, tmp_path):
-    fake_run(monkeypatch, raises=subprocess.TimeoutExpired("node", 5), write_output=True)
+    fake_engine(monkeypatch, hang=True, write_output=True)
     with pytest.raises(slicing.SliceError) as e:
-        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path), timeout=5)
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path), timeout=0.2)
     assert e.value.status == 500 and "time limit" in str(e.value)
+    assert FakePopen.instances[0].killed
     assert not os.path.exists(tmp_path / "model.gcode.3mf")
 
 
@@ -536,11 +582,7 @@ def test_run_slice_missing_output(monkeypatch, tmp_path):
 
 
 def test_run_slice_deletes_output_when_check_fails(monkeypatch, tmp_path):
-    def run(cmd, **kw):
-        with zipfile.ZipFile(cmd[-2], "w") as z:
-            z.writestr("Metadata/plate_1.gcode", gcode(nozzle="0.6"))
-        return subprocess.CompletedProcess([], 0, stdout='RESULT {"ok":true}\n', stderr="")
-    monkeypatch.setattr(slicing.subprocess, "run", run)
+    fake_zip_run(monkeypatch, gcode(nozzle="0.6"))
     with pytest.raises(slicing.SliceError) as e:
         slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
     assert "nozzle_diameter" in str(e.value)
@@ -558,16 +600,180 @@ def test_run_slice_cleans_engine_scratch_folder(monkeypatch, tmp_path):
 
 
 def test_run_slice_success_summary(monkeypatch, tmp_path):
-    def run(cmd, **kw):
-        assert kw["cwd"] == slicing.SLICER_DIR
-        with zipfile.ZipFile(cmd[-2], "w") as z:
-            z.writestr("Metadata/plate_1.gcode", gcode())
-        return subprocess.CompletedProcess([], 0, stdout='RESULT {"ok":true}\n', stderr="")
-    monkeypatch.setattr(slicing.subprocess, "run", run)
+    fake_zip_run(monkeypatch, gcode())
     path, summary = slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
     assert path == str(tmp_path / "model.gcode.3mf") and os.path.exists(path)
     assert summary["layers"] == 348 and summary["triangles"] == 12 and summary["size_mm"] == pytest.approx([20] * 3)
     assert summary["filament"] == "PLA Basic" and summary["plate"] == "Textured PEI"
+
+
+
+# ---------- B2: Popen, log file, watchdog ----------
+def test_engine_runs_niced_with_output_in_a_log_file(monkeypatch, tmp_path):
+    fake_zip_run(monkeypatch, gcode())
+    slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    kw = FakePopen.instances[0].kw
+    assert kw["cwd"] == slicing.SLICER_DIR and kw["stderr"] == subprocess.STDOUT
+    assert kw["stdout"].name == str(tmp_path / "engine.log")      # a file, not a pipe
+    assert kw["preexec_fn"] is slicing._lower_priority
+    assert 'RESULT {"ok":true}' in (tmp_path / "engine.log").read_text()
+
+
+def test_lower_priority_survives_a_failing_nice(monkeypatch):
+    def boom(n):
+        raise OSError("no")
+    monkeypatch.setattr(slicing.os, "nice", boom)
+    slicing._lower_priority()
+
+
+def test_memory_kill_from_the_cgroup_total(monkeypatch, tmp_path):
+    fake_engine(monkeypatch, hang=True, write_output=True)
+    mb = 1048576
+    monkeypatch.setattr(slicing, "read_cgroup_memory", lambda: (480 * mb, 512 * mb))     # within 40 MB of the max
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path), timeout=30)
+    assert e.value.status == 413 and "too large to slice on this server (out of memory)" in str(e.value)
+    assert "0.28 mm Extra Draft" in str(e.value)
+    assert FakePopen.instances[0].killed and not os.path.exists(tmp_path / "model.gcode.3mf")
+
+
+def test_cgroup_below_the_margin_is_fine_and_margin_is_configurable(monkeypatch):
+    mb = 1048576
+    monkeypatch.setattr(slicing, "read_cgroup_memory", lambda: (400 * mb, 512 * mb))
+    assert slicing.memory_exceeded(1) is False
+    monkeypatch.setenv("SLICE_MEM_MARGIN_MB", "200")
+    assert slicing.memory_exceeded(1) is True
+
+
+def test_rss_fallback_without_a_cgroup_limit(monkeypatch, tmp_path):
+    fake_engine(monkeypatch, hang=True)
+    mb = 1048576
+    rss = {4242: 400 * mb, None: 80 * mb}
+    monkeypatch.setattr(slicing, "read_rss", lambda pid: rss[pid])
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path), timeout=30)
+    assert e.value.status == 413
+    rss[4242] = 300 * mb
+    assert slicing.memory_exceeded(4242) is False
+    monkeypatch.setenv("SLICE_MEM_LIMIT_MB", "350")
+    assert slicing.memory_exceeded(4242) is True
+
+
+def test_cgroup_reader(monkeypatch, tmp_path):
+    monkeypatch.setattr(slicing, "CGROUP_DIR", str(tmp_path))
+    assert slicing.read_cgroup_memory() is None                     # files absent
+    (tmp_path / "memory.max").write_text("max\n")
+    (tmp_path / "memory.current").write_text("123\n")
+    assert slicing.read_cgroup_memory() is None                     # unlimited
+    (tmp_path / "memory.max").write_text("536870912\n")
+    assert slicing.read_cgroup_memory() == (123, 536870912)
+
+
+def test_read_rss_of_this_process():
+    assert slicing.read_rss(None) > 1_000_000
+    assert slicing.read_rss(2 ** 22 + 12345) == 0
+
+
+def test_normal_exit_still_parses_result(monkeypatch, tmp_path):
+    fake_run(monkeypatch, subprocess.CompletedProcess([], 1, stdout='x\nRESULT {"ok":false,"error":"boom"}\n', stderr=""))
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    assert "boom" in str(e.value)
+
+
+def test_engine_start_failure(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise FileNotFoundError("node")
+    monkeypatch.setattr(slicing.subprocess, "Popen", boom)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.run_slice(stl_bytes(box_tris(20, 20, 20, 0, 0, 0)), {}, str(tmp_path))
+    assert "could not be started" in str(e.value)
+
+
+# ---------- B1: lean prepare_stl ----------
+def big_stl(n=150_000):
+    one = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0)
+    body = bytearray(one * n)
+    for i in range(0, n, 997):                  # vary a few coordinates so the box is not trivial
+        struct.pack_into("<3f", body, 50 * i + 12, -20 + (i % 40), 5, 30)
+    return b"x" * 80 + struct.pack("<I", n) + bytes(body)
+
+
+def test_prepare_stl_is_memory_lean():
+    import tracemalloc
+    data = big_stl()
+    tracemalloc.start()
+    base = tracemalloc.get_traced_memory()[0]
+    out, info = slicing.prepare_stl(data)
+    peak = tracemalloc.get_traced_memory()[1] - base
+    tracemalloc.stop()
+    assert info["triangles"] == 150_000 and len(out) == len(data)
+    assert peak < 40 * 1048576, peak
+    assert min(struct.unpack_from("<12fH", out, 84 + 50 * k)[5] for k in range(0, 150_000, 997)) >= 0
+
+
+def test_prepare_stl_chunk_edges_are_exact():
+    for count in (1, slicing._CHUNK - 1, slicing._CHUNK, slicing._CHUNK + 1, 2 * slicing._CHUNK + 3):
+        tris = [((i % 7, 0, 1), (i % 7 + 1, 2, 3), (i % 5, 4, 8)) for i in range(count)]
+        out, info = slicing.prepare_stl(stl_bytes(tris))
+        n, (xs, ys, zs) = read_stl(out)
+        assert n == count and min(zs) == pytest.approx(0) and max(zs) == pytest.approx(7)
+        assert (min(xs) + max(xs)) / 2 == pytest.approx(128) and (min(ys) + max(ys)) / 2 == pytest.approx(128)
+
+
+def test_prepare_stl_keeps_normals_and_attributes():
+    data = bytearray(stl_bytes(box_tris(10, 10, 10, 0, 0, 0)))
+    struct.pack_into("<3f", data, 84, 0.25, 0.5, 0.75)
+    struct.pack_into("<H", data, 84 + 48, 777)
+    out, _ = slicing.prepare_stl(bytes(data))
+    assert struct.unpack_from("<3f", out, 84) == (0.25, 0.5, 0.75) and struct.unpack_from("<H", out, 132)[0] == 777
+
+
+def test_non_finite_in_a_later_chunk_is_found():
+    tris = [((0, 0, 0), (1, 0, 0), (0, 1, 0))] * (slicing._CHUNK + 5)
+    data = bytearray(stl_bytes(tris))
+    struct.pack_into("<f", data, 84 + 50 * (slicing._CHUNK + 2) + 12, float("nan"))
+    with pytest.raises(slicing.SliceError):
+        slicing.prepare_stl(bytes(data))
+
+
+def test_run_slice_prepared_skips_parsing_and_drops_the_stl(monkeypatch, tmp_path):
+    import tracemalloc
+    calls = []
+    real = slicing.prepare_stl
+    monkeypatch.setattr(slicing, "prepare_stl", lambda d: calls.append(1) or real(d))
+    prepared, info = real(big_stl(20_000))
+    seen = {}
+
+    def on_start(cmd, kw):
+        seen["now"] = tracemalloc.get_traced_memory()[0]
+        with zipfile.ZipFile(cmd[-2], "w") as z:
+            z.writestr("Metadata/plate_1.gcode", gcode())
+    fake_engine(monkeypatch, on_start=on_start, log='RESULT {"ok":true}\n')
+    tracemalloc.start()
+    base = tracemalloc.get_traced_memory()[0]
+    _, summary = slicing.run_slice(prepared, {}, str(tmp_path), prepared=info)
+    tracemalloc.stop()
+    assert calls == [] and summary["triangles"] == 20_000
+    assert (tmp_path / "model.stl").read_bytes() == prepared
+    # the caller still holds `prepared` (1 MB); the function itself must not add another copy
+    assert seen["now"] - base < 300_000
+
+
+def test_run_slice_without_prepared_parses_once_and_frees_the_upload(monkeypatch, tmp_path):
+    import tracemalloc
+    seen = {}
+
+    def on_start(cmd, kw):
+        seen["now"] = tracemalloc.get_traced_memory()[0]
+        with zipfile.ZipFile(cmd[-2], "w") as z:
+            z.writestr("Metadata/plate_1.gcode", gcode())
+    fake_engine(monkeypatch, on_start=on_start, log='RESULT {"ok":true}\n')
+    tracemalloc.start()
+    base = tracemalloc.get_traced_memory()[0]
+    slicing.run_slice(big_stl(20_000), {}, str(tmp_path))     # nothing else holds the upload or the prepared copy
+    tracemalloc.stop()
+    assert seen["now"] - base < 300_000, seen["now"] - base
 
 
 # ---------- available ----------
@@ -578,6 +784,14 @@ def test_available_false_without_engine(monkeypatch, tmp_path):
 
 
 # ---------- the real engine ----------
+@pytest.fixture(autouse=True)
+def _roomy_memory_guard_for_real_runs(request, monkeypatch):
+    """The real engine runs inside a big pytest process here, so the RSS fallback of the watchdog (470 MB on the
+    free instance) would fire; the guard itself is tested with fakes above."""
+    if request.node.name.startswith("test_real"):
+        monkeypatch.setenv("SLICE_MEM_LIMIT_MB", "8000")
+
+
 needs_engine = pytest.mark.skipif(not slicing.available(), reason="engine not installed (bash image3d/slicer/install.sh)")
 
 

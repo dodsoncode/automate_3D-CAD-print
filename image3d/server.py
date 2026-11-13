@@ -289,10 +289,11 @@ def root():
 
 
 # ---------- Slice for P1S: one background job at a time ----------
-SLICER = slicing.run_slice  # tests replace this: (stl bytes, choice dict, workdir) -> (path, summary)
+SLICER = slicing.run_slice  # tests replace this: (prepared stl bytes, choice dict, workdir, prepared=info) -> (path, summary)
 SLICER_AVAILABLE = slicing.available  # tests replace this
-JOB_KEEP_S = 1800  # a finished job (and its file) stays this long
-JOB_STALE_S = slicing.TIMEOUT_S + 60  # a job still "running" after the slice timeout plus a margin has died
+JOB_KEEP_S = 1800  # a finished job (and its file) stays this long (less if the free server sleeps or restarts)
+JOB_ABSOLUTE_CAP_S = 3600  # last resort: a job whose thread is still alive after this long is reported as stuck
+STUCK_DETAIL = "the slice stopped responding; restart the service if this persists"
 _jobs = {}  # id -> job dict; guarded by _jobs_lock
 _jobs_lock = threading.Lock()
 _worker = None  # the latest background thread (the tests join it)
@@ -304,13 +305,21 @@ def _drop(job_id):
         shutil.rmtree(job["dir"], ignore_errors=True)
 
 
+def _alive(job):
+    return job["thread"] is not None and job["thread"].is_alive()
+
+
 def _sweep_jobs():
-    """Caller holds _jobs_lock. Expires finished jobs and fails jobs that have been running too long."""
+    """Caller holds _jobs_lock. A running job is failed when its thread has died without finishing, or (stuck) when
+    it has run for the absolute cap; it keeps blocking new slices while its thread lives. Finished jobs expire."""
     now = CLOCK()
     for job_id, job in list(_jobs.items()):
-        if job["state"] == "running" and now - job["started"] > JOB_STALE_S:
-            job.update(state="failed", detail="the slice timed out", finished=now)
-        if job["state"] != "running" and now - job["finished"] >= JOB_KEEP_S:
+        if job["state"] == "running":
+            if not _alive(job):
+                job.update(state="failed", detail="the slice stopped unexpectedly", finished=now)
+            elif now - job["started"] > JOB_ABSOLUTE_CAP_S:
+                job.update(state="failed", detail=STUCK_DETAIL, finished=now, stuck=True)
+        if job["state"] != "running" and now - job["finished"] >= JOB_KEEP_S and not _alive(job):
             _drop(job_id)
 
 
@@ -320,18 +329,19 @@ def reset_jobs():
             _drop(job_id)
 
 
-def _run_job(job, stl, choice):
+def _run_job(job, choice, info):
     try:
-        path, summary = SLICER(stl, choice, job["dir"])
+        path, summary = SLICER(job.pop("stl"), choice, job["dir"], prepared=info)
         outcome = dict(state="done", detail="", summary=summary, path=path)
     except slicing.SliceError as e:
         outcome = dict(state="failed", detail=str(e)[:MAX_DETAIL])
     except Exception as e:  # whatever goes wrong, the job must not stay "running"
         outcome = dict(state="failed", detail=("slice failed: %s" % (str(e) or e.__class__.__name__))[:MAX_DETAIL])
     with _jobs_lock:
-        if _jobs.get(job["id"]) is job and job["state"] == "running":  # not already failed as stale or removed
+        if _jobs.get(job["id"]) is job and job["state"] == "running":  # not already failed as stuck or removed
             job.update(outcome, finished=CLOCK())
-            for other_id in [i for i, o in _jobs.items() if o is not job and o["state"] != "running"]:
+            for other_id in [i for i, o in _jobs.items() if o is not job and o["state"] != "running"
+                             and not _alive(o)]:
                 _drop(other_id)  # a newer job finished: the older results go
 
 
@@ -339,11 +349,12 @@ def _run_job(job, stl, choice):
 def slice_options():
     options = {key: [{"id": r["id"], "label": r["label"]} for r in rows] for key, rows in slicing.OPTIONS.items()}
     return {"available": bool(SLICER_AVAILABLE()), "limits": {"max_triangles": slicing.MAX_TRIANGLES},
-            "options": options}
+            "options": options, "incompatible": [list(pair) for pair in sorted(slicing.INCOMPATIBLE)]}
 
 
 def _running():
-    return any(j["state"] == "running" for j in _jobs.values())
+    """Caller holds _jobs_lock. True while a worker thread that has not finished (or is stuck) is alive."""
+    return any(_alive(j) and (j["state"] == "running" or j.get("stuck")) for j in _jobs.values())
 
 
 @app.post("/api/slice")
@@ -362,21 +373,31 @@ async def slice_start(model: UploadFile = File(...), filament: str = Form(None),
         return _fail(413, "model is too large (10 MB limit)")
     choice = {k: v for k, v in (("filament", filament), ("quality", quality), ("plate", plate),
                                 ("supports", supports)) if v}
-    try:  # same checks run_slice repeats: a bad upload is answered now, nothing is queued
-        await run_in_threadpool(slicing.prepare_stl, data)
+    try:  # validated once here; the job gets the prepared bytes and does not parse them again
         slicing.settings_for(choice)
+        prepared, info = await run_in_threadpool(slicing.prepare_stl, data)
     except slicing.SliceError as e:
         return _fail(e.status, str(e)[:MAX_DETAIL])
+    del data
     with _jobs_lock:
         _sweep_jobs()
         if _running():
             return _fail(409, "a slice is already running")
         job_id = secrets.token_urlsafe(8)
-        job = {"id": job_id, "state": "running", "detail": "", "summary": None, "path": None,
-               "dir": tempfile.mkdtemp(prefix="slice-"), "started": CLOCK(), "finished": None}
-        _jobs[job_id] = job
-        _worker = threading.Thread(target=_run_job, args=(job, data, choice), daemon=True)
-        _worker.start()
+        job = {"id": job_id, "state": "running", "detail": "", "summary": None, "path": None, "dir": None,
+               "started": CLOCK(), "finished": None, "thread": None, "stl": prepared}
+        try:
+            job["dir"] = tempfile.mkdtemp(prefix="slice-")
+            thread = threading.Thread(target=_run_job, args=(job, choice, info), daemon=True)
+            job["thread"] = thread
+            _jobs[job_id] = job
+            thread.start()
+            _worker = thread
+        except Exception:
+            _jobs.pop(job_id, None)
+            if job["dir"]:
+                shutil.rmtree(job["dir"], ignore_errors=True)
+            return _fail(500, "could not start the slice")
     return JSONResponse({"job": job_id}, status_code=202)
 
 
