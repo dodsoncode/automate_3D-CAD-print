@@ -10,7 +10,7 @@ _(updated at the end of every step)_
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
 - **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
 - **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
-- **Send to printer (branch `send-helpers`):** the slice result can copy a one-line a-Shell command, or open the "Send to P1S" iPhone Shortcut, to send the file to the printer over Wi-Fi. Desktop-tested and checked with a real curl; NOT tried on the phone.
+- **Send to printer (branch `send-helpers`, PR #13 open):** the slice result can copy a one-line a-Shell command, or open the "Send to P1S" iPhone Shortcut, to send the file to the printer over Wi-Fi. Desktop-tested and checked with a real curl; NOT tried on the phone.
 - **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL9 (try the send box and Shortcut), SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
@@ -436,3 +436,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Full run: `python -m pytest -q image3d/tests gui/tests` 377 passed (367 + 10 new); `firmware` 39 passed. Built `image3d.html` is current.
 - NOT verified: the Shortcut steps were written from the Shortcuts and a-Shell action names as documented, not built on a phone; a-Shell's Execute Command running network commands from a Shortcut is untested.
 - NEXT: PR to `main`; Jacob says when to merge, then SL9.
+
+### 2026-11-14 - Send to printer: PR #13 opened
+- DONE: branch `send-helpers` pushed; PR #13 opened to `main`. Not merged; waits for Jacob.
+- NEXT: Jacob - say when to merge; then SL9 (try the send box, set up the Shortcut).
+- BLOCKED: nothing for Claude.
