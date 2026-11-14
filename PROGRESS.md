@@ -382,3 +382,20 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: branch `slice-send` pushed; PR #11 opened to `main` ("Image3D: Slice for P1S"). Not merged; waits for Jacob. The PR also carries the merge-log note for PR #10 and the CLAUDE.md workflow line.
 - NEXT: Jacob - say when to merge; then SL4, SL5, SL3.
 - BLOCKED: nothing for Claude.
+
+### 2026-11-13 - P1S slicing: PR #11 merged; slicer live on Render; phone upload and first print (Jacob)
+- DONE: PR #11 merged at Jacob's request (merge commit `7731fee`).
+- DONE (SL4, confirmed on Render by Jacob): the first deploy ran the old build command, so the slicer was not installed (`"available": false`). Cause: the service is managed by a Render Blueprint and the Blueprint had not synced the new `render.yaml`. Jacob tapped **Manual sync** on the Blueprint page; the sync updated the build command to `pip install -r requirements.txt && bash slicer/install.sh` and added `HF_EXTRA_JSON`. After the redeploy the page shows the "Slice for P1S" panel (the slicer installed and its test slice ran on Render). `image3d/DEPLOY.md` now says to sync the Blueprint.
+- DONE (confirmed on Render and on a real phone by Jacob): a real slice finished on the free instance and the phone downloaded a 372 KB `model.gcode.3mf`. Slice time and memory on Render were not recorded.
+- DONE (SL3, confirmed on the real printer by Jacob): FTPS upload from the iPhone works with LAN Only mode and Developer Mode OFF (Bambu Handy kept). What worked: the free app a-Shell and `curl --insecure --ftp-pasv -T model.gcode.3mf ftps://<printer-ip>:990/ --user bblp:<access code>` (file found with a-Shell's `pickFolder`). What did not: the app "FTP Client - Files location" fails with "no-features" on test and browse, in both printer modes. `image3d/PRINTING.md` updated.
+- DONE (SL5 attempted, real printer): the uploaded file started from the printer's screen. First try printed dry because no filament was loaded (the file's start sequence loads AMS slot 1 only when the printer runs it with the AMS in use); with filament loaded the print ran: the centre cylinder printed cleanly on its brim, two other small parts came loose and left strings. Jacob's reading: bed adhesion (the plate needs washing). SL5 stays open until a print finishes cleanly.
+- Parked ideas (Jacob, 2026-11-13): a home helper for one-tap sending to the printer (needs an always-on device); a Brim option on the slice panel; an iPhone Shortcut wrapping the upload command.
+- Security note: the printer access code was visible in two screenshots in the chat; Jacob was told to regenerate it. It is not in the repo.
+- NEXT: Jacob - wash the plate and retry a small print (SL5).
+
+### 2026-11-13 - Image3D Mirror step 1: mirror maths (`mesh.js`)
+- Request (Jacob): a "symmetric" feature; agreed design: a Mirror button in the Cut panel that keeps one side of the plane and joins it to its reflection.
+- DONE: `mesh.mirror(model, axis, value, keep)`: cuts each shell without a cap, reflects the kept part across the plane with the winding flipped, and shares the vertices that lie on the plane, so the two halves are one closed piece with no wall inside. A piece wholly on the kept side gets a twin; a piece wholly on the other side is dropped. The plane must lie strictly inside the model's bounding box ("mirror plane misses the model").
+- Tests written first (7, all failed before the code, all pass after): cube on three planes, hollow frame (one closed piece, twice the kept volume), three-piece model, refused planes and bad arguments, plane through an existing ring of vertices, and 240 random planes on 40 bumpy closed shapes (closed, same on both sides, no triangle left in the plane, volume = 2 x kept half).
+- Verification: script-checked (Node). NOT run on a real generated model yet.
+- NEXT: Mirror button on the page.

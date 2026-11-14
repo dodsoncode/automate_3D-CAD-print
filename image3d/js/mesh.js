@@ -1,4 +1,4 @@
-/* Mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut.
+/* Mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut, mirror.
  * One dependency: earcut (vendor/earcut.min.js) for triangulating cut caps.
  *
  * A shell is {v: [x,y,z, ...], t: [i,j,k, ...]} with shared (welded) vertices and outward-facing CCW triangles
@@ -226,7 +226,8 @@
     return tris.map(function (t) { return [ids[t[0]], ids[t[1]], ids[t[2]]]; });
   }
 
-  function cutShell(sh, a, value, sgn) {
+  // noCap: leave the cut open and return the kept part as one unsplit shell (mirror joins it to its reflection)
+  function cutShell(sh, a, value, sgn, noCap) {
     var nv0 = sh.v.length / 3, bb = bbox([sh]);
     var eps = 1e-7 * Math.sqrt(bb.size[0] * bb.size[0] + bb.size[1] * bb.size[1] + bb.size[2] * bb.size[2]);
     var V = sh.v.slice(), D = new Array(nv0), i;
@@ -260,6 +261,7 @@
       }
     }
     if (!T.length) return [];
+    if (noCap) return [compact(V, T)];
 
     // chain the plane edges into closed loops (an open mesh leaves broken chains, which just get no cap)
     var out = new Map(), used = new Array(edges.length).fill(false), loops = [], e;
@@ -324,9 +326,35 @@
     return out;
   }
 
+  // keeps one side of the plane and joins it to its own reflection, so the model is the same on both sides.
+  // The two halves share the vertices on the plane, so no wall is left inside. A piece wholly on the kept side
+  // gets a mirrored twin; a piece wholly on the other side is dropped.
+  function mirror(model, axis, value, keep) {
+    var a = AXES[axis];
+    if (a === undefined) throw new Error('axis must be x, y or z');
+    if (keep !== 'above' && keep !== 'below') throw new Error("keep must be 'above' or 'below'");
+    var b = model.length ? bbox(model) : null;
+    if (!b || !(value > b.min[a] && value < b.max[a])) throw new Error('mirror plane misses the model');
+    var out = [];
+    model.forEach(function (s) {
+      cutShell(s, a, value, keep === 'above' ? 1 : -1, true).forEach(function (h) {
+        var n = h.v.length / 3, v = h.v.slice(), t = h.t.slice(), twin = new Array(n), i;
+        for (i = 0; i < n; i++) {
+          if (h.v[3 * i + a] === value) { twin[i] = i; continue; } // on the plane: shared by both halves
+          twin[i] = v.length / 3;
+          for (var c = 0; c < 3; c++) v.push(c === a ? 2 * value - h.v[3 * i + c] : h.v[3 * i + c]);
+        }
+        for (i = 0; i < h.t.length; i += 3) t.push(twin[h.t[i]], twin[h.t[i + 2]], twin[h.t[i + 1]]); // reflected: winding flips
+        split({ v: v, t: t }).forEach(function (p) { out.push(p); });
+      });
+    });
+    if (!out.length) throw new Error('mirror plane misses the model');
+    return out;
+  }
+
   return {
     weld: weld, split: split, bbox: bbox, volume: volume, isClosed: isClosed,
     scale: scale, scaleToLongest: scaleToLongest, rotate90: rotate90, layFlat: layFlat,
-    removePiece: removePiece, keepLargest: keepLargest, dropSmall: dropSmall, cut: cut
+    removePiece: removePiece, keepLargest: keepLargest, dropSmall: dropSmall, cut: cut, mirror: mirror
   };
 });
