@@ -10,7 +10,8 @@ _(updated at the end of every step)_
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
 - **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
 - **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
+- **Send to printer (branch `send-helpers`):** the slice result can copy a one-line a-Shell command, or open the "Send to P1S" iPhone Shortcut, to send the file to the printer over Wi-Fi. Desktop-tested and checked with a real curl; NOT tried on the phone.
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL9 (try the send box and Shortcut), SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -429,3 +430,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests written first (10 page tests, all failed before the code): exact command; details never appear in any request to the server and survive a reload; bad IP / access code refused without copying; name cleaned; unquotable passcode refused; clipboard-blocked fallback; Shortcut link carries only name:job and follows the name; setup text; box hides with the result; and the copied command run by a REAL curl against the test server with the FTPS address swapped for a local file (file arrives; a wrong passcode exits 22 before any upload).
 - Verification: desktop browser at phone size (Playwright) + real curl 8.5 here. NOT verified: a-Shell's curl running the one-line `--next` command on the phone, the Shortcut on the phone, the upload to the printer from this command (the FTPS part itself worked on the printer on 2026-11-13).
 - NEXT: Shortcut setup steps in PRINTING.md, full test run, PR.
+
+### 2026-11-14 - Send to printer step 2: docs and full test run
+- DONE: `image3d/PRINTING.md` (the send box, and step-by-step setup of the "Send to P1S" Shortcut: Match Text, If, regex Replace Text with the setup text, a-Shell Execute Command, Otherwise Show Alert), `image3d/README.md`, `TASKS.md` (SL8 done, SL9 for Jacob; the parked "Shortcut" idea is now SL8/SL9), `image3d/PROGRESS.md`.
+- Full run: `python -m pytest -q image3d/tests gui/tests` 377 passed (367 + 10 new); `firmware` 39 passed. Built `image3d.html` is current.
+- NOT verified: the Shortcut steps were written from the Shortcuts and a-Shell action names as documented, not built on a phone; a-Shell's Execute Command running network commands from a Shortcut is untested.
+- NEXT: PR to `main`; Jacob says when to merge, then SL9.
