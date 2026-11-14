@@ -9,7 +9,7 @@ _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
 - **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
-- **Mirror (branch `mirror`):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
+- **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
 - **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
@@ -412,4 +412,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `image3d/README.md` (mirror), `image3d/DEPLOY.md` (sync the Blueprint when the build command does not change), `image3d/PRINTING.md` (the phone upload that worked, the FTP app that did not, load filament before starting, first print result), `TASKS.md` (SL3 and SL4 done, SL5 open with the first attempt noted, SL6 Mirror done, SL7 phone check, parked ideas), `image3d/PROGRESS.md`.
 - Full run: `python -m pytest -q image3d/tests gui/tests` 367 passed (357 before + 7 mirror maths + 3 mirror page tests; the real-engine slicing tests ran); `firmware` 39 passed. The built `image3d.html` is current.
 - NEXT: PR to `main`; Jacob says when to merge. After the merge Render redeploys (no build-command change this time).
+- BLOCKED: nothing for Claude.
+
+### 2026-11-13 - Image3D Mirror: PR #12 opened
+- DONE: branch `mirror` pushed; PR #12 opened to `main` ("Image3D: Mirror (make both sides match)"). Not merged; waits for Jacob.
+- NEXT: Jacob - say when to merge; then try Mirror on the phone (SL7) and retry the first print (SL5).
 - BLOCKED: nothing for Claude.
