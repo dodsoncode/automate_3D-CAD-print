@@ -947,3 +947,46 @@ def test_result_line_shows_size_without_trailing_zero(browser, live_server):
     pg.wait_for_function("!document.getElementById('slice-result').hidden")
     assert pg.locator("#slice-line").inner_text().endswith(" \u00b7 70 x 70 x 12.5 mm")
     pg.context.close()
+
+
+def _set_cut_pos(page, fraction):
+    page.evaluate("""(f => { const r = document.getElementById('cut-pos');
+      r.value = parseFloat(r.min) + f * (parseFloat(r.max) - parseFloat(r.min));
+      r.dispatchEvent(new Event('input', {bubbles: true})); })(%s)""" % fraction)
+
+
+def test_mirror_button_keeps_one_side_and_doubles_it(page):
+    open_sample(page, "unit_box.glb", rows=1)
+    before = page.evaluate("I3D.mesh.bbox(I3DApp.state.model).size")
+    page.select_option("#cut-axis", "x")
+    page.select_option("#cut-keep", "above")
+    _set_cut_pos(page, 0.25)
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is True
+    page.locator("#btn-mirror").tap()
+    res = page.evaluate("""(() => { const m = I3D.mesh, s = I3DApp.state.model, b = m.bbox(s);
+      return {n: s.length, closed: s.every(m.isClosed), size: b.size, min: b.min, max: b.max}; })()""")
+    assert res["n"] == 1 and res["closed"]
+    assert res["size"][0] == pytest.approx(1.5 * before[0], abs=0.2)   # kept 75 %, mirrored
+    assert res["size"][1] == pytest.approx(before[1], abs=1e-6)
+    assert res["min"][0] == pytest.approx(-res["max"][0], abs=1e-6) and res["min"][2] == pytest.approx(0, abs=1e-9)
+    assert "Mirrored" in page.locator("#msg").inner_text()
+    assert page.evaluate("I3DApp.cutPreviewVisible()") is False
+    page.locator("#btn-undo").tap()
+    assert page.evaluate("I3D.mesh.bbox(I3DApp.state.model).size")[0] == pytest.approx(before[0], abs=1e-6)
+
+
+def test_mirror_at_the_edge_changes_nothing_and_says_why(page):
+    open_sample(page, "unit_box.glb", rows=1)
+    before = page.evaluate("JSON.stringify(I3DApp.state.model)")
+    page.select_option("#cut-axis", "y")
+    _set_cut_pos(page, 0)
+    page.locator("#btn-mirror").tap()
+    assert page.evaluate("JSON.stringify(I3DApp.state.model)") == before
+    assert "crosses the model" in page.locator("#msg").inner_text()
+    assert page.locator("#btn-undo").is_disabled()
+
+
+def test_mirror_needs_a_model(page):
+    page.locator("#btn-mirror").tap()
+    assert page.locator("#msg").inner_text() != ""
+    assert page.evaluate("I3DApp.state.model.length") == 0

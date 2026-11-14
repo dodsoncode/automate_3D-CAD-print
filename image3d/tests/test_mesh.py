@@ -247,3 +247,93 @@ def test_cut_cap_fuzz_grid_holes_and_pinch_points():
     assert set(rep) == {"gridHoles", "bowtie", "holeTouchesOutline", "holeTouchesHole", "collinearPinch"}
     for name, s in rep.items():
         assert s["runs"] == 120 and s["fails"] == 0, (name, s["first"])
+
+
+# ---------- mirror ----------
+MIRROR_HELPERS = """
+// summary of a mirrored model: closed pieces, total volume, bbox, symmetric about the plane, no wall left in the plane
+function summary(m,a,value){const A={x:0,y:1,z:2}[a];let sym=true,inPlane=0;
+  m.forEach(s=>{const keys=new Set();
+    for(let i=0;i<s.v.length;i+=3)keys.add([0,1,2].map(c=>Math.round(s.v[i+c]*1e6)).join(','));
+    for(let i=0;i<s.t.length;i+=3)if([0,1,2].every(k=>s.v[3*s.t[i+k]+A]===value))inPlane++;});
+  const all=new Set();m.forEach(s=>{for(let i=0;i<s.v.length;i+=3)all.add([0,1,2].map(c=>Math.round(s.v[i+c]*1e6)).join(','));});
+  m.forEach(s=>{for(let i=0;i<s.v.length;i+=3){const p=[s.v[i],s.v[i+1],s.v[i+2]];p[A]=2*value-p[A];
+    if(!all.has(p.map(c=>Math.round(c*1e6)).join(',')))sym=false;}});
+  const b=mesh.bbox(m);
+  return {pieces:m.length,closed:m.every(mesh.isClosed),vol:m.reduce((s,x)=>s+mesh.volume(x),0),min:b.min,max:b.max,sym:sym,inPlane:inPlane};}
+// bumpy closed blob (latitude/longitude sphere with a radius that varies), centre c
+function blob(n,c,seed){const v=[],t=[];let s=seed||1;const rnd=()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};
+  const k1=1+Math.floor(rnd()*4),k2=1+Math.floor(rnd()*4),ph=rnd()*6;
+  const rad=(th,fi)=>10*(1+0.25*Math.sin(k1*fi+ph)*Math.sin(th)+0.15*Math.cos(k2*th));
+  v.push(c[0],c[1],c[2]+rad(0,0));
+  for(let r=1;r<n;r++){const th=Math.PI*r/n;for(let i=0;i<2*n;i++){const fi=Math.PI*i/n,R=rad(th,fi);
+    v.push(c[0]+R*Math.sin(th)*Math.cos(fi),c[1]+R*Math.sin(th)*Math.sin(fi),c[2]+R*Math.cos(th));}}
+  const bot=v.length/3;v.push(c[0],c[1],c[2]-rad(Math.PI,0));const W=2*n,ring=r=>1+(r-1)*W;
+  for(let i=0;i<W;i++){const j=(i+1)%W;t.push(0,ring(1)+i,ring(1)+j);t.push(bot,ring(n-1)+j,ring(n-1)+i);}
+  for(let r=1;r<n-1;r++)for(let i=0;i<W;i++){const j=(i+1)%W,a=ring(r)+i,b=ring(r)+j,d=ring(r+1)+i,e=ring(r+1)+j;t.push(a,d,e,a,e,b);}
+  return {v:v,t:t};}
+"""
+
+
+def test_mirror_cube_keeps_one_side_and_doubles_it():
+    o = node(MIRROR_HELPERS + """const c=cube(20);
+console.log(JSON.stringify({lo:summary(mesh.mirror([c],'x',15,'below'),'x',15),hi:summary(mesh.mirror([c],'x',15,'above'),'x',15),
+  z:summary(mesh.mirror([c],'z',5,'above'),'z',5),same:c.v.length===24}));""")
+    lo, hi, z = o["lo"], o["hi"], o["z"]
+    assert lo["pieces"] == 1 and lo["closed"] and lo["sym"] and lo["inPlane"] == 0
+    assert abs(lo["vol"] - 12000) < 1e-6 and lo["min"][0] == 0 and lo["max"][0] == 30
+    assert hi["pieces"] == 1 and hi["closed"] and hi["sym"] and hi["inPlane"] == 0
+    assert abs(hi["vol"] - 4000) < 1e-6 and hi["min"][0] == 10 and hi["max"][0] == 20
+    assert z["closed"] and abs(z["vol"] - 12000) < 1e-6 and z["min"][2] == 5 - 15 and z["max"][2] == 20
+    assert o["same"]  # the input is not changed
+
+
+def test_mirror_hollow_frame_is_one_closed_piece_with_twice_the_kept_volume():
+    o = node(MIRROR_HELPERS + """const t=tube(3);const half=mesh.cut([t],'x',2,'above').reduce((s,x)=>s+mesh.volume(x),0);
+const m=mesh.mirror([t],'x',2,'above');console.log(JSON.stringify(Object.assign(summary(m,'x',2),{half:half})));""")
+    assert o["pieces"] == 1 and o["closed"] and o["sym"] and o["inPlane"] == 0
+    assert abs(o["vol"] - 2 * o["half"]) < 1e-6
+
+
+def test_mirror_twins_pieces_on_the_kept_side_and_drops_the_other_side():
+    o = node(MIRROR_HELPERS + """const m=[box(10,10,10,0,0,0),box(10,10,10,30,0,0),box(10,10,10,-30,0,0)];
+const r=mesh.mirror(m,'x',5,'above');console.log(JSON.stringify(summary(r,'x',5)));""")
+    # the cut cube -> one 10 mm cube again; the cube at x 30..40 -> itself and a twin at -30..-20; the third is dropped
+    assert o["pieces"] == 3 and o["closed"] and o["sym"] and o["inPlane"] == 0
+    assert abs(o["vol"] - 3000) < 1e-6 and o["min"][0] == -30 and o["max"][0] == 40
+
+
+def test_mirror_plane_must_cross_the_model():
+    o = node("""const c=cube(20), out=[];
+[['x',0,'above'],['x',20,'below'],['x',-5,'above'],['x',25,'below'],['q',5,'above'],['x',5,'left']].forEach(a=>{
+  try{mesh.mirror([c],a[0],a[1],a[2]);out.push('ok');}catch(e){out.push(e.message);}});
+console.log(JSON.stringify(out));""")
+    assert o[:4] == ["mirror plane misses the model"] * 4
+    assert o[4] == "axis must be x, y or z" and o[5] == "keep must be 'above' or 'below'"
+
+
+def test_mirror_plane_on_a_face_keeping_the_whole_model_is_refused():
+    # plane on the far face, keeping everything: the model would just get a twin glued face to face
+    o = node("""const c=cube(20);let r;try{mesh.mirror([c],'x',20,'above');r='ok';}catch(e){r=e.message;}
+console.log(JSON.stringify(r));""")
+    assert o == "mirror plane misses the model"
+
+
+def test_mirror_bumpy_blobs_on_random_planes_stay_closed_and_symmetric():
+    o = node(MIRROR_HELPERS + """let s=7;const rnd=()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};
+const bad=[];let runs=0;
+for(let k=0;k<40;k++){const b=blob(12+Math.floor(rnd()*20),[rnd()*40-20,rnd()*40-20,rnd()*40],k+1),bb=mesh.bbox([b]);
+  for(const a of ['x','y','z'])for(const keep of ['above','below']){const A={x:0,y:1,z:2}[a];
+    const value=bb.min[A]+bb.size[A]*(0.1+0.8*rnd());runs++;
+    try{const half=mesh.cut([b],a,value,keep).reduce((q,x)=>q+mesh.volume(x),0),m=mesh.mirror([b],a,value,keep),u=summary(m,a,value);
+      if(!u.closed||!u.sym||u.inPlane||Math.abs(u.vol-2*half)>1e-6*half)bad.push({k:k,a:a,keep:keep,value:value,u:u,half:half});
+    }catch(e){bad.push({k:k,a:a,keep:keep,value:value,error:e.message});}}}
+console.log(JSON.stringify({runs:runs,bad:bad.slice(0,3),nbad:bad.length}));""")
+    assert o["runs"] == 240 and o["nbad"] == 0, o["bad"]
+
+
+def test_mirror_through_existing_vertices_stays_closed():
+    # plane exactly through a ring of vertices (the generator's models have many vertices; sliders land on them)
+    o = node(MIRROR_HELPERS + """const b=blob(16,[0,0,0],3);const z=b.v[3*(1+7*32)+2]; // z of ring 8
+const m=mesh.mirror([b],'z',z,'above');console.log(JSON.stringify(summary(m,'z',z)));""")
+    assert o["closed"] and o["sym"] and o["inPlane"] == 0 and o["pieces"] == 1

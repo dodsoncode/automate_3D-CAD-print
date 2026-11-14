@@ -8,8 +8,9 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 _(updated at the end of every step)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Slice for P1S (branch `slice-send`, PR not yet opened):** final review fix wave applied (2026-11-12): PETG HF + Cool Plate refused, bed-heat and excluded-corner G-code checks, clear overhang and out-of-memory messages, a memory/time watchdog around the engine, an install step that proves the engine by slicing a test cube, and page fixes. Verification: slicer core and install step run with the real engine in Claude's workspace; server and page tested with a fake slicer in a desktop browser; real end-to-end runs through the real server. NOT verified: the slicer on Render (including its memory limit and the engine's system libraries), a real phone, any print.
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/` (photo -> STL editor) is built and desktop-tested; the editor is published as a claude.ai artifact. TI6 and TI7 are done (Jacob reported the Render deploy and phone editor working on 2026-11-12). After the Slice for P1S PR is merged Jacob does SL4 (redeploy, check the slicer is available) and SL5 (first small watched print)
+- **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
+- **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
+- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -381,4 +382,39 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 ### 2026-11-12 - P1S slicing: PR #11 opened
 - DONE: branch `slice-send` pushed; PR #11 opened to `main` ("Image3D: Slice for P1S"). Not merged; waits for Jacob. The PR also carries the merge-log note for PR #10 and the CLAUDE.md workflow line.
 - NEXT: Jacob - say when to merge; then SL4, SL5, SL3.
+- BLOCKED: nothing for Claude.
+
+### 2026-11-13 - P1S slicing: PR #11 merged; slicer live on Render; phone upload and first print (Jacob)
+- DONE: PR #11 merged at Jacob's request (merge commit `7731fee`).
+- DONE (SL4, confirmed on Render by Jacob): the first deploy ran the old build command, so the slicer was not installed (`"available": false`). Cause: the service is managed by a Render Blueprint and the Blueprint had not synced the new `render.yaml`. Jacob tapped **Manual sync** on the Blueprint page; the sync updated the build command to `pip install -r requirements.txt && bash slicer/install.sh` and added `HF_EXTRA_JSON`. After the redeploy the page shows the "Slice for P1S" panel (the slicer installed and its test slice ran on Render). `image3d/DEPLOY.md` now says to sync the Blueprint.
+- DONE (confirmed on Render and on a real phone by Jacob): a real slice finished on the free instance and the phone downloaded a 372 KB `model.gcode.3mf`. Slice time and memory on Render were not recorded.
+- DONE (SL3, confirmed on the real printer by Jacob): FTPS upload from the iPhone works with LAN Only mode and Developer Mode OFF (Bambu Handy kept). What worked: the free app a-Shell and `curl --insecure --ftp-pasv -T model.gcode.3mf ftps://<printer-ip>:990/ --user bblp:<access code>` (file found with a-Shell's `pickFolder`). What did not: the app "FTP Client - Files location" fails with "no-features" on test and browse, in both printer modes. `image3d/PRINTING.md` updated.
+- DONE (SL5 attempted, real printer): the uploaded file started from the printer's screen. First try printed dry because no filament was loaded (the file's start sequence loads AMS slot 1 only when the printer runs it with the AMS in use); with filament loaded the print ran: the centre cylinder printed cleanly on its brim, two other small parts came loose and left strings. Jacob's reading: bed adhesion (the plate needs washing). SL5 stays open until a print finishes cleanly.
+- Parked ideas (Jacob, 2026-11-13): a home helper for one-tap sending to the printer (needs an always-on device); a Brim option on the slice panel; an iPhone Shortcut wrapping the upload command.
+- Security note: the printer access code was visible in two screenshots in the chat; Jacob was told to regenerate it. It is not in the repo.
+- NEXT: Jacob - wash the plate and retry a small print (SL5).
+
+### 2026-11-13 - Image3D Mirror step 1: mirror maths (`mesh.js`)
+- Request (Jacob): a "symmetric" feature; agreed design: a Mirror button in the Cut panel that keeps one side of the plane and joins it to its reflection.
+- DONE: `mesh.mirror(model, axis, value, keep)`: cuts each shell without a cap, reflects the kept part across the plane with the winding flipped, and shares the vertices that lie on the plane, so the two halves are one closed piece with no wall inside. A piece wholly on the kept side gets a twin; a piece wholly on the other side is dropped. The plane must lie strictly inside the model's bounding box ("mirror plane misses the model").
+- Tests written first (7, all failed before the code, all pass after): cube on three planes, hollow frame (one closed piece, twice the kept volume), three-piece model, refused planes and bad arguments, plane through an existing ring of vertices, and 240 random planes on 40 bumpy closed shapes (closed, same on both sides, no triangle left in the plane, volume = 2 x kept half).
+- Verification: script-checked (Node). NOT run on a real generated model yet.
+- NEXT: Mirror button on the page.
+
+### 2026-11-13 - Image3D Mirror step 2: Mirror button on the page
+- DONE: `index.html`: the Cut section is now "Cut or mirror" with a Mirror button beside Cut. It uses the same axis, slider and kept side (the preview plane shows the mirror line), then seats the result on the bed; Undo restores the model. With the slider at the edge of the model it changes nothing and says "Move the slider so the plane crosses the model, then tap Mirror." `image3d.html` rebuilt with `build.py`.
+- Tests written first (3 page tests, failed before the code): mirror at 25 % keeps 75 % and gives a single closed piece 1.5 x as wide, centred, on the bed, undo restores; mirror at the edge leaves the model and the undo stack untouched; Mirror without a model shows a message.
+- Extra check: a 114,920-triangle bumpy shape mirrored in 82 ms (Node, Claude's workspace), one closed piece; an open (damaged) mesh does not throw.
+- Verification: desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model (no live generation was run for this change).
+- NEXT: docs, full test run, PR.
+
+### 2026-11-13 - Image3D Mirror step 3: docs and full test run
+- DONE: `image3d/README.md` (mirror), `image3d/DEPLOY.md` (sync the Blueprint when the build command does not change), `image3d/PRINTING.md` (the phone upload that worked, the FTP app that did not, load filament before starting, first print result), `TASKS.md` (SL3 and SL4 done, SL5 open with the first attempt noted, SL6 Mirror done, SL7 phone check, parked ideas), `image3d/PROGRESS.md`.
+- Full run: `python -m pytest -q image3d/tests gui/tests` 367 passed (357 before + 7 mirror maths + 3 mirror page tests; the real-engine slicing tests ran); `firmware` 39 passed. The built `image3d.html` is current.
+- NEXT: PR to `main`; Jacob says when to merge. After the merge Render redeploys (no build-command change this time).
+- BLOCKED: nothing for Claude.
+
+### 2026-11-13 - Image3D Mirror: PR #12 opened
+- DONE: branch `mirror` pushed; PR #12 opened to `main` ("Image3D: Mirror (make both sides match)"). Not merged; waits for Jacob.
+- NEXT: Jacob - say when to merge; then try Mirror on the phone (SL7) and retry the first print (SL5).
 - BLOCKED: nothing for Claude.

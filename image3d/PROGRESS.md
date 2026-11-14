@@ -9,7 +9,9 @@ Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-too
 - **Built and tested here:** mesh editing maths, file readers, the phone editor page, the Render service.
 - **Slice for P1S, final fix wave (2026-11-12):** PETG HF + Cool Plate refused; G-code checks for bed heat, exact filament and the excluded bed corner; plain overhang and out-of-memory messages; engine run with a memory/time watchdog; leaner STL handling; install step that proves the engine with a test slice; page fixes (stale results, resume, passcode, poll timeout, floating-piece warning, incompatible plates, size in the result line). Verified with the real engine in Claude's workspace and with a fake slicer in a desktop browser. NOT verified: Render, a real phone, any print.
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
-- **Waiting on Jacob:** nothing for TI6 / TI7: he reported on 2026-11-12 that the Render deploy and the phone editor work well. Open now: SL4 (redeploy for the slicer), SL5 (first test print), SL3 (FTPS upload test).
+- **Live on Render (2026-11-13, confirmed by Jacob):** the slicer (after a manual Blueprint sync), a real slice and download on the phone, upload to the printer over Wi-Fi with a-Shell + curl (LAN-only and Developer Mode off), file started on the printer. No clean print yet (first attempt: two small parts came loose).
+- **Mirror (2026-11-13, branch `mirror`):** Mirror button in the Cut panel; script-checked and desktop-tested; not tried on a phone or a real generated model.
+- **Waiting on Jacob:** SL5 (a clean first print: wash the plate, load filament first), SL7 (try Mirror on the phone).
 - **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
 - **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
   Claude app.
@@ -156,12 +158,19 @@ second **free Render** service next to the mental fitness app.
 - Real end-to-end run through the real server with the real engine (`tests/e2e_slice.py`, Claude's workspace, 2 CPU cores): `two_cubes.stl` 2.0 s; a 124,500-triangle bumpy sphere 15.6 s, 3.1 MB file; the same model through `slicing.run_slice` alone 14.0 s, peak 368 MB (engine) + 98 MB (Python). Both results passed the G-code check.
 - NOT verified: the slicer on Render (the free instance has 0.1 CPU and 512 MB, so expect about 3 minutes by estimate and watch memory), a real phone for the slice section, any print.
 
+### Step 22 - Live on Render, phone upload, first print attempt (2026-11-13, Jacob)
+- PR #11 merged. The first redeploy ran the old build command; a manual Blueprint sync fixed it and the slicer installed (Slice panel visible).
+- A real slice on the free instance produced a 372 KB `model.gcode.3mf`, downloaded on the phone.
+- Upload to the printer from the phone: works with a-Shell + `curl` on port 990 with LAN-only and Developer Mode off; the app "FTP Client - Files location" fails with "no-features".
+- First print: dry at first (no filament loaded), then the centre part printed well and two small parts came loose (adhesion).
+
+### Step 23 - Mirror (2026-11-13)
+- `mesh.mirror` (kept side + its reflection, joined on the plane, no inner wall) and a Mirror button in the "Cut or mirror" section. 7 maths tests and 3 page tests written first. Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
 
-1. **SL4 - get the slicer:** after the Slice for P1S PR is merged, redeploy on Render and follow "Updating to get the slicer" in [`DEPLOY.md`](DEPLOY.md).
-2. **SL5 - first test print:** a small model, watched, following [`PRINTING.md`](PRINTING.md).
-3. **SL3 (optional):** try the FTPS upload once and report whether it works on your printer.
-(TI6 and TI7 are done: reported working on 2026-11-12.)
+1. **SL5 - a clean first print:** wash the plate, load filament from the printer's screen first, print one small piece, watch it ([`PRINTING.md`](PRINTING.md)).
+2. **SL7 - try Mirror on the phone** with a generated model, after the Mirror PR is merged and Render has redeployed.
 
 ## How to run the tests
 
