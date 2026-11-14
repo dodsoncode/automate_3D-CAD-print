@@ -45,6 +45,15 @@
   #slice-float { color: #8a5a00; }
   #slice-result { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e1e6ee; }
   #slice-result button { width: 100%; margin-top: 8px; }
+  #send-box { margin-top: 10px; border: 1px solid #d3dae4; border-radius: 8px; padding: 0 10px; }
+  #send-box summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+  #send-box[open] { padding-bottom: 10px; }
+  a.btn { display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 8px; border: 1px solid #b6c0ce; border-radius: 8px; background: #fff; color: #1c2430; text-decoration: none; }
+  #send-fallback { width: 100%; min-height: 110px; margin-top: 8px; font: 13px/1.3 ui-monospace, Menlo, monospace; }
+  #send-fallback[hidden] { display: none; }
+  #send-msg { margin-top: 6px; }
+  #send-msg:empty { display: none; }
+  #send-msg.err { color: #a11; }
   .val { text-align: center; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -95,8 +104,20 @@
         <div id="slice-status" role="status" aria-live="polite"></div>
         <div id="slice-result" hidden>
           <div id="slice-line"></div>
-          <div class="small">Copy the file to the printer's microSD card, then start it on the printer. First print: watch the first layers.</div>
+          <div class="small">Get the file onto the printer (microSD card, or send it below), then start it on the printer's screen with filament loaded. First print: watch the first layers.</div>
           <button id="btn-slice-download" class="primary">Download print file</button>
+          <details id="send-box">
+            <summary>Send to printer from this phone</summary>
+            <div class="small">Needs the a-Shell app and the phone on the printer's Wi-Fi. These details stay on this phone; they are never sent to the server.</div>
+            <label for="send-ip">Printer IP address</label><input type="text" id="send-ip" inputmode="decimal" autocomplete="off" placeholder="192.168.1.50">
+            <label for="send-code">Printer access code</label><input type="password" id="send-code" autocomplete="off">
+            <label for="send-name">Name on the printer</label><input type="text" id="send-name" autocomplete="off" autocapitalize="off" placeholder="model">
+            <button id="btn-send-copy" class="primary">Copy a-Shell command</button>
+            <a id="btn-send-shortcut" class="btn" href="#">Send with Shortcut</a>
+            <button id="btn-send-template">Copy Shortcut setup text</button>
+            <textarea id="send-fallback" readonly hidden aria-label="Command to copy"></textarea>
+            <div id="send-msg" class="small" role="status" aria-live="polite"></div>
+          </details>
         </div>
       </div>
     </div>
@@ -534,7 +555,7 @@
     $('slice-line').textContent = (earlier ? 'Result from your earlier slice: ' : '') + 'Print time ' + s.print_time + ' · ' + fmt(s.filament_g) + ' g · ' + s.layers + ' layers · ' +
       s.filament + ', ' + s.quality + ', ' + s.plate + (supportsOn ? ', tree supports' : '') +
       (Array.isArray(s.size_mm) && s.size_mm.length === 3 ? ' · ' + s.size_mm.map(fmt).join(' x ') + ' mm' : '');
-    sliceDoneJob = id; $('btn-slice-download').disabled = false; $('slice-result').hidden = false;
+    sliceDoneJob = id; $('btn-slice-download').disabled = false; $('slice-result').hidden = false; updateShortcutLink();
   }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function detailFrom(status, body) {
@@ -621,6 +642,77 @@
       .catch(function (e) { msg(errText(e), true); })
       .then(function () { b.disabled = false; });
   });
+  // ---------- send to the printer (a-Shell command, or an iPhone Shortcut) ----------
+  // The printer's IP and access code are kept in this phone's storage only and are never sent to the server; the
+  // command fetches the slice from this site (with the site passcode) and uploads it to the printer by FTPS in one curl
+  // call (--next; --fail-early stops before the upload if the fetch fails). The Shortcut link carries only name:job, so
+  // a web page cannot make the Shortcut run a command of its own.
+  var SEND_KEY = 'image3d.printer', SHORTCUT = 'Send to P1S';
+  function sendMsg(t, err) { $('send-msg').textContent = t; $('send-msg').className = 'small' + (err ? ' err' : ''); }
+  function cleanName(n) {
+    n = String(n || '').trim().replace(/\.gcode\.3mf$/i, '').replace(/\.3mf$/i, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    return n.replace(/-+$/, '');
+  }
+  function sendName() { var n = cleanName($('send-name').value); $('send-name').value = n; return n || 'model'; }
+  function saveSend() {
+    try { localStorage.setItem(SEND_KEY, JSON.stringify({ ip: $('send-ip').value.trim(), code: $('send-code').value.trim(), name: $('send-name').value })); } catch (e) { /* storage blocked */ }
+  }
+  function goodIp(ip) {
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+    return !!m && m.slice(1).every(function (x) { return +x <= 255; });
+  }
+  // the details the command needs, or an error message
+  function sendParts() {
+    var ip = $('send-ip').value.trim(), code = $('send-code').value.trim(), pass = $('gen-pass').value;
+    if (!goodIp(ip)) return { err: "Enter the printer's IP address (WLAN screen on the printer), like 192.168.1.50" };
+    if (!/^[A-Za-z0-9]{4,32}$/.test(code)) return { err: 'Enter the access code from the printer\'s WLAN screen (letters and numbers only)' };
+    if (!pass) return { err: 'Enter the passcode in the Generate section first' };
+    if (/['$\\\x00-\x1f\x7f]/.test(pass)) return { err: "The site passcode has a ', $ or \\ in it, which the command cannot carry. Use Download print file instead." };
+    return { ip: ip, code: code, pass: pass };
+  }
+  function siteBase() { return location.origin + location.pathname.replace(/[^/]*$/, ''); }
+  function uploadCommand(p, name, job) {
+    var f = name + '.gcode.3mf';
+    return "curl --fail-early -fS -H 'X-Passcode: " + p.pass + "' -o " + f + " '" + siteBase() + 'api/slice/' + job + "/file' --next --insecure --ftp-pasv -T " +
+      f + " 'ftps://" + p.ip + ':990/' + f + "' --user 'bblp:" + p.code + "'";
+  }
+  function updateShortcutLink() {
+    var job = sliceDoneJob || '';
+    $('btn-send-shortcut').href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT) + '&input=text&text=' + encodeURIComponent(cleanName($('send-name').value) || 'model') + '%3A' + encodeURIComponent(job);
+  }
+  function copyText(text, okText) {
+    $('send-fallback').hidden = true;
+    var done = function () { sendMsg(okText); }, fail = function () {
+      $('send-fallback').value = text; $('send-fallback').hidden = false; $('send-fallback').focus(); $('send-fallback').select();
+      sendMsg('Could not copy automatically: copy it by hand from the box (it contains your access code).', true);
+    };
+    try { navigator.clipboard.writeText(text).then(done, fail); } catch (e) { fail(); }
+  }
+  try {
+    var sv = JSON.parse(localStorage.getItem(SEND_KEY) || 'null');
+    if (sv) { $('send-ip').value = sv.ip || ''; $('send-code').value = sv.code || ''; $('send-name').value = sv.name || ''; }
+  } catch (e) { /* storage blocked or bad data */ }
+  ['send-ip', 'send-code', 'send-name'].forEach(function (id) {
+    $(id).addEventListener('input', function () { saveSend(); updateShortcutLink(); });
+  });
+  $('send-name').addEventListener('change', function () { sendName(); saveSend(); updateShortcutLink(); });
+  $('btn-send-copy').addEventListener('click', function () {
+    var p = sendParts(), job = sliceDoneJob;
+    if (p.err) { $('send-fallback').hidden = true; sendMsg(p.err, true); return; }
+    if (!job) { sendMsg('Slice first.', true); return; }
+    var name = sendName(); saveSend(); updateShortcutLink();
+    copyText(uploadCommand(p, name, job), 'Copied. Open a-Shell, paste, press return. 100% and no "curl:" error means it is on the printer; start it on the printer\'s screen. Works while this slice is kept on the server (up to 30 minutes).');
+  });
+  $('btn-send-shortcut').addEventListener('click', function (e) {
+    if (!sliceDoneJob) { e.preventDefault(); sendMsg('Slice first.', true); return; }
+    sendName(); saveSend(); updateShortcutLink();
+  });
+  $('btn-send-template').addEventListener('click', function () {
+    var p = sendParts();
+    if (p.err) { $('send-fallback').hidden = true; sendMsg(p.err, true); return; }
+    copyText(uploadCommand(p, '$1', '$2'), 'Copied the setup text for the "' + SHORTCUT + '" Shortcut (it contains your access code). Paste it into the Shortcut\'s Replace Text action; see PRINTING.md.');
+  });
+
   // a person changing a setting makes the shown result (and its Download) stale; filling the lists in code does not
   SLICE_SELECTS.forEach(function (k) {
     $('slice-' + k).addEventListener('change', function () {
