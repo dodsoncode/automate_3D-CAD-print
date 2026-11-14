@@ -23,14 +23,25 @@ The printer stays in normal cloud mode. Nothing here needs LAN-only mode or Deve
 2. Copy `model.gcode.3mf` onto the card.
 3. Put the card back in the printer and start the file from the printer's screen.
 
-**B. FTPS app over home Wi-Fi (not verified on your printer)**
-1. Phone on the same Wi-Fi as the printer.
-2. In an FTPS-capable file-transfer app, make a connection with type "FTP with implicit TLS/SSL" (not SFTP).
-3. Host: the printer's IP address (on the printer's network settings screen). Port: 990. User: `bblp`. Password: the access code shown on the same network settings screen.
-4. Upload `model.gcode.3mf` to the root folder.
-5. Start the file from the printer's screen (Files / SD card).
+**B. Upload over home Wi-Fi from the phone (worked on Jacob's P1S on 2026-11-13, LAN-only and Developer Mode off)**
+The printer accepts file uploads by FTPS (FTP with implicit TLS) on port 990, user `bblp`, password = the access code on the printer's WLAN screen. What worked on the iPhone is the free app **a-Shell** and one `curl` command:
+1. Phone on the same Wi-Fi as the printer. A microSD card must be in the printer.
+2. On the page, tap Download print file and save `model.gcode.3mf` (for example to Downloads).
+3. Open a-Shell. Type `pickFolder`, choose the folder that holds the file, tap Open. `ls` should list `model.gcode.3mf`.
+4. Type on one line, with the printer's IP address and access code filled in:
+   `curl --insecure --ftp-pasv -T model.gcode.3mf ftps://PRINTER-IP:990/ --user bblp:ACCESS-CODE`
+   A progress line that reaches 100 % and no `curl:` error means it is on the printer. (372 KB took about 7 seconds.)
+5. Start the file from the printer's screen (folder icon).
 
-Other users report that route B works on the P1 series without LAN-only mode, but it is NOT verified on your printer or firmware. Large uploads were reported unreliable on some firmware. If it fails, use the card.
+To test the connection without uploading: `curl -v --insecure --ftp-pasv ftps://PRINTER-IP:990/ --user bblp:ACCESS-CODE` lists the card's folders.
+
+Notes:
+- The app "FTP Client - Files location" did NOT work with the printer (error "no-features" on Test Server and Browse, with LAN-only on and off). Other FTP apps are untried.
+- Keep the access code private; do not put it in screenshots. It can be regenerated on the printer's WLAN screen.
+- Large uploads were reported unreliable on some firmware by other users; not seen here (one small file tried). If an upload fails, use the card.
+
+## Before you start the file: filament
+The file's start sequence loads filament from **AMS slot 1** only when the printer runs it with the AMS in use. On 2026-11-13 the first try printed dry (nothing loaded). The reliable way: load the filament from the printer's screen first (until plastic comes out of the nozzle), then start the file. How the start screen's AMS option behaves for this file is still not pinned down.
 
 ## First-print checklist
 1. Make the first print a small model.
@@ -57,7 +68,6 @@ Before the file is offered, the server checks it automatically:
 If a check fails, no file is offered and the page says why.
 
 NOT verified:
-- No print has been made from this tool's output.
-- The slicer has not yet run on Render.
+- No print from this tool's output has finished cleanly yet. First attempt (2026-11-13): the centre part printed well on its brim; two small parts came loose (bed adhesion: wash the plate, print one piece at a time, give small parts a bigger footprint).
 - The actual temperature values (bed and nozzle) and the Z height are whatever Bambu's stock profiles set; they are not checked. Only "the bed temperature is above zero and the bed is told to heat" is checked.
 - How the printer handles the AMS slot for this file.

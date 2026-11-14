@@ -105,6 +105,13 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 ## Slice and send from the phone (added 2026-11-12)
 - [x] SL1 (C) Feasibility spike (`docs/2026-11-12-slice-send-feasibility.md`)
 - [x] SL2 (J) Decided 2026-11-12: build "Slice for P1S" on the free Render instance; keep Handy
-- [ ] SL3 (J) Try once: upload a `.gcode.3mf` to the printer's SD card with an FTPS app on the phone, start it on the printer
-- [ ] SL4 (J) After the PR is merged: redeploy on Render, check the build log says `SLICER INSTALL: ok` and `/api/slice/options` shows `"available": true` (`image3d/DEPLOY.md`)
-- [ ] SL5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`)
+- [x] SL3 (J) Upload from the phone over Wi-Fi works with LAN-only and Developer Mode off (a-Shell + curl, 2026-11-13; the app "FTP Client - Files location" does not work); file started on the printer (`image3d/PRINTING.md`)
+- [x] SL4 (J) Done 2026-11-13 after a manual Blueprint sync (slicer available on Render, a real slice downloaded on the phone). Was: redeploy on Render, check the build log says `SLICER INSTALL: ok` and `/api/slice/options` shows `"available": true` (`image3d/DEPLOY.md`)
+- [ ] SL5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`). First attempt 2026-11-13: partly printed, two small parts came loose (adhesion). Wash the plate, load filament first, retry.
+- [x] SL6 (C) Mirror button in the editor (keep one side of a plane, copy it across so both sides match) - desktop-tested 2026-11-13
+- [ ] SL7 (J) Try Mirror on the phone with a generated model
+
+### Parked (Jacob, 2026-11-13)
+- Brim option on the slice panel (small parts came loose on the first print)
+- iPhone Shortcut that wraps the upload command (one tap)
+- Home helper for a "Send to printer" button (needs an always-on device at home; about 4-6 hours)

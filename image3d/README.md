@@ -1,6 +1,6 @@
 # Image3D editor
 
-A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone.
+A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, mirror (make both sides match), and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone.
 
 ## Two ways to use it
 
@@ -14,7 +14,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `index.html` | The editor page (needs `js/`, `vendor/` and `../gui/vendor/`) |
 | `image3d.html` | Single-file build of the page (committed); works from any directory and as an artifact |
 | `build.py` | `python image3d/build.py` bundles `index.html` into `image3d.html` |
-| `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, closed check) and STL read/write |
+| `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, mirror, closed check) and STL read/write |
 | `vendor/earcut.min.js` | Polygon triangulation for cut caps (earcut 2.2.4, ISC; see `vendor/LICENSES.txt`) |
 | Slicer licences | the slicer engine (npm `orcaslicer-addon`, AGPL-3.0-only) and OrcaSlicer's Bambu profiles (AGPL-3.0) are downloaded at build time and run unmodified in a separate process; nothing from them is committed to this repo. Revisit the licence terms if the service is ever opened to other people. |
 | `js/glb.js`, `js/obj.js`, `js/readany.js` | File readers (GLB, OBJ; `readany.js` picks by extension, STL goes through `stl.js`) |

@@ -68,11 +68,11 @@
     <div class="row"><button id="btn-rot-x">Rotate X</button><button id="btn-rot-y">Rotate Y</button><button id="btn-rot-z">Rotate Z</button></div>
     <div class="row"><button id="btn-flat">Lay flat on bed</button></div>
 
-    <h2>Cut</h2>
+    <h2>Cut or mirror</h2>
     <div class="row"><select id="cut-axis" aria-label="Cut axis"><option value="x">Axis X</option><option value="y">Axis Y</option><option value="z" selected>Axis Z (height)</option></select>
       <select id="cut-keep" aria-label="Keep side"><option value="above">Keep above</option><option value="below">Keep below</option></select></div>
     <div class="row"><input type="range" id="cut-pos" min="0" max="100" step="0.1" value="50" aria-label="Cut position"><span id="cut-val" class="val" style="flex:0 0 76px">50 mm</span></div>
-    <div class="row"><button id="btn-cut" class="primary">Cut</button></div>
+    <div class="row"><button id="btn-cut" class="primary">Cut</button><button id="btn-mirror" title="Keep this side and copy it across the plane, so both sides match">Mirror</button></div>
 
     <h2>Checks</h2>
     <div><span id="chk-closed" class="chk">no model</span><span id="chk-bed" class="chk">bed</span><span id="chk-count" class="chk">0 pieces</span></div>
@@ -1195,7 +1195,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 </script>
 <script>/* mesh.js */
-/* Mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut.
+/* Mesh maths for the image3d editor: weld, split, measure, scale, orient, delete pieces, cut, mirror.
  * One dependency: earcut (vendor/earcut.min.js) for triangulating cut caps.
  *
  * A shell is {v: [x,y,z, ...], t: [i,j,k, ...]} with shared (welded) vertices and outward-facing CCW triangles
@@ -1423,7 +1423,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return tris.map(function (t) { return [ids[t[0]], ids[t[1]], ids[t[2]]]; });
   }
 
-  function cutShell(sh, a, value, sgn) {
+  // noCap: leave the cut open and return the kept part as one unsplit shell (mirror joins it to its reflection)
+  function cutShell(sh, a, value, sgn, noCap) {
     var nv0 = sh.v.length / 3, bb = bbox([sh]);
     var eps = 1e-7 * Math.sqrt(bb.size[0] * bb.size[0] + bb.size[1] * bb.size[1] + bb.size[2] * bb.size[2]);
     var V = sh.v.slice(), D = new Array(nv0), i;
@@ -1457,6 +1458,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       }
     }
     if (!T.length) return [];
+    if (noCap) return [compact(V, T)];
 
     // chain the plane edges into closed loops (an open mesh leaves broken chains, which just get no cap)
     var out = new Map(), used = new Array(edges.length).fill(false), loops = [], e;
@@ -1521,10 +1523,36 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return out;
   }
 
+  // keeps one side of the plane and joins it to its own reflection, so the model is the same on both sides.
+  // The two halves share the vertices on the plane, so no wall is left inside. A piece wholly on the kept side
+  // gets a mirrored twin; a piece wholly on the other side is dropped.
+  function mirror(model, axis, value, keep) {
+    var a = AXES[axis];
+    if (a === undefined) throw new Error('axis must be x, y or z');
+    if (keep !== 'above' && keep !== 'below') throw new Error("keep must be 'above' or 'below'");
+    var b = model.length ? bbox(model) : null;
+    if (!b || !(value > b.min[a] && value < b.max[a])) throw new Error('mirror plane misses the model');
+    var out = [];
+    model.forEach(function (s) {
+      cutShell(s, a, value, keep === 'above' ? 1 : -1, true).forEach(function (h) {
+        var n = h.v.length / 3, v = h.v.slice(), t = h.t.slice(), twin = new Array(n), i;
+        for (i = 0; i < n; i++) {
+          if (h.v[3 * i + a] === value) { twin[i] = i; continue; } // on the plane: shared by both halves
+          twin[i] = v.length / 3;
+          for (var c = 0; c < 3; c++) v.push(c === a ? 2 * value - h.v[3 * i + c] : h.v[3 * i + c]);
+        }
+        for (i = 0; i < h.t.length; i += 3) t.push(twin[h.t[i]], twin[h.t[i + 2]], twin[h.t[i + 1]]); // reflected: winding flips
+        split({ v: v, t: t }).forEach(function (p) { out.push(p); });
+      });
+    });
+    if (!out.length) throw new Error('mirror plane misses the model');
+    return out;
+  }
+
   return {
     weld: weld, split: split, bbox: bbox, volume: volume, isClosed: isClosed,
     scale: scale, scaleToLongest: scaleToLongest, rotate90: rotate90, layFlat: layFlat,
-    removePiece: removePiece, keepLargest: keepLargest, dropSmall: dropSmall, cut: cut
+    removePiece: removePiece, keepLargest: keepLargest, dropSmall: dropSmall, cut: cut, mirror: mirror
   };
 });
 
@@ -1960,7 +1988,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function apply(fn, okMsg) {
     var next;
-    try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : String(e.message || e), true); return false; }
+    try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : e.message === 'mirror plane misses the model' ? 'Move the slider so the plane crosses the model, then tap Mirror.' : String(e.message || e), true); return false; }
     undoStack.push(state.model); while (undoStack.length > undoLimit()) undoStack.shift();
     state.model = next; state.selected = -1;
     refresh(); msg(okMsg || '');
@@ -2062,6 +2090,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (!needModel()) return;
     var a = $('cut-axis').value, v = parseFloat($('cut-pos').value), keep = $('cut-keep').value;
     apply(function (m) { return M.layFlat(M.cut(m, a, v, keep)); }, 'Cut at ' + a.toUpperCase() + ' = ' + fmt(v) + ' mm.');
+  });
+  // Mirror: same plane and kept side as Cut; the kept side is copied across the plane and joined to itself
+  $('btn-mirror').addEventListener('click', function () {
+    if (!needModel()) return;
+    var a = $('cut-axis').value, v = parseFloat($('cut-pos').value), keep = $('cut-keep').value;
+    apply(function (m) { return M.layFlat(M.mirror(m, a, v, keep)); }, 'Mirrored across ' + a.toUpperCase() + ' = ' + fmt(v) + ' mm. Both sides now match.');
   });
   $('btn-undo').addEventListener('click', undo);
   $('btn-export').addEventListener('click', doExport);
