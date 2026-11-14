@@ -110,8 +110,9 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] SL5 (J) First small test print from a downloaded `model.gcode.3mf`, watched (`image3d/PRINTING.md`). First attempt 2026-11-13: partly printed, two small parts came loose (adhesion). Wash the plate, load filament first, retry.
 - [x] SL6 (C) Mirror button in the editor (keep one side of a plane, copy it across so both sides match) - desktop-tested 2026-11-13
 - [ ] SL7 (J) Try Mirror on the phone with a generated model
+- [x] SL8 (C) "Send to printer from this phone": copy a-Shell command + "Send to P1S" Shortcut link - desktop-tested 2026-11-14
+- [ ] SL9 (J) Try "Copy a-Shell command" on the phone, then set up the Shortcut and try "Send with Shortcut" (`image3d/PRINTING.md`)
 
 ### Parked (Jacob, 2026-11-13)
 - Brim option on the slice panel (small parts came loose on the first print)
-- iPhone Shortcut that wraps the upload command (one tap)
 - Home helper for a "Send to printer" button (needs an always-on device at home; about 4-6 hours)

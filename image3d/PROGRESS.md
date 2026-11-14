@@ -11,7 +11,8 @@ Times are US Central on 2026-11-11. Steps 1-13 were built on branch `image3d-too
 - **Published:** the editor as a private claude.ai artifact named "Image3D editor".
 - **Live on Render (2026-11-13, confirmed by Jacob):** the slicer (after a manual Blueprint sync), a real slice and download on the phone, upload to the printer over Wi-Fi with a-Shell + curl (LAN-only and Developer Mode off), file started on the printer. No clean print yet (first attempt: two small parts came loose).
 - **Mirror (2026-11-13, branch `mirror`):** Mirror button in the Cut panel; script-checked and desktop-tested; not tried on a phone or a real generated model.
-- **Waiting on Jacob:** SL5 (a clean first print: wash the plate, load filament first), SL7 (try Mirror on the phone).
+- **Send to printer (2026-11-14, branch `send-helpers`):** copy a one-line a-Shell command, or tap "Send with Shortcut"; desktop-tested and checked with a real curl; not tried on the phone.
+- **Waiting on Jacob:** SL9 (try the send box and the Shortcut), SL5 (a clean first print: wash the plate, load filament first), SL7 (try Mirror on the phone).
 - **Verified live (2026-11-11):** the Hugging Face generation call, from Claude's workspace.
 - **Not verified by anyone yet:** a real phone, the Render deploy, and the zip download inside the real
   Claude app.
@@ -167,8 +168,12 @@ second **free Render** service next to the mental fitness app.
 ### Step 23 - Mirror (2026-11-13)
 - `mesh.mirror` (kept side + its reflection, joined on the plane, no inner wall) and a Mirror button in the "Cut or mirror" section. 7 maths tests and 3 page tests written first. Details in the root `PROGRESS.md`.
 
+### Step 24 - Send to printer from the phone (2026-11-14)
+- Slice result gains "Send to printer from this phone": printer IP, access code and name kept on the phone only; "Copy a-Shell command" (one curl call: fetch from the site, then FTPS upload), "Send with Shortcut" (passes only name:job to the "Send to P1S" Shortcut), "Copy Shortcut setup text". 10 page tests written first, one of them runs the command with a real curl. Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
 
+1. **SL9 - try the send box:** after the next merge and redeploy, slice, open "Send to printer from this phone", fill it in, tap Copy a-Shell command, paste into a-Shell. Then set up the Shortcut ([`PRINTING.md`](PRINTING.md)) and try Send with Shortcut.
 1. **SL5 - a clean first print:** wash the plate, load filament from the printer's screen first, print one small piece, watch it ([`PRINTING.md`](PRINTING.md)).
 2. **SL7 - try Mirror on the phone** with a generated model, after the Mirror PR is merged and Render has redeployed.
 

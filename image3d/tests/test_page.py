@@ -4,6 +4,7 @@ import functools
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -990,3 +991,170 @@ def test_mirror_needs_a_model(page):
     page.locator("#btn-mirror").tap()
     assert page.locator("#msg").inner_text() != ""
     assert page.evaluate("I3DApp.state.model.length") == 0
+
+
+# ---------- Send to printer: copy command and Shortcut link ----------
+CLIP = """window.__clip = null; Object.defineProperty(navigator, 'clipboard', {value: {writeText: async (t) => { window.__clip = t; }}});"""
+CLIP_FAIL = """Object.defineProperty(navigator, 'clipboard', {value: {writeText: async (t) => { throw new Error('denied'); }}});"""
+
+
+def sliced(browser, url, init=CLIP):
+    pg = slice_page(browser, url, init)
+    pg.requests = []
+    pg.on("request", lambda r: pg.requests.append((r.url, json.dumps(r.headers), r.post_data_buffer or b"")))
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    return pg
+
+
+def fill_printer(pg, ip="192.168.1.50", code="ab12CD34", name="robot-leg"):
+    pg.locator("#send-box summary").tap()
+    pg.fill("#send-ip", ip)
+    pg.fill("#send-code", code)
+    pg.fill("#send-name", name)
+
+
+def test_send_copy_builds_one_curl_command(browser, live_server):
+    pg = sliced(browser, live_server)
+    job = pg.evaluate("sessionStorage.getItem('image3d.slicejob')")
+    fill_printer(pg)
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("window.__clip !== null")
+    cmd = pg.evaluate("window.__clip")
+    origin = live_server.rstrip("/")
+    assert cmd == ("curl --fail-early -fS -H 'X-Passcode: sesame' -o robot-leg.gcode.3mf "
+                   "'%s/api/slice/%s/file' --next --insecure --ftp-pasv -T robot-leg.gcode.3mf "
+                   "'ftps://192.168.1.50:990/robot-leg.gcode.3mf' --user 'bblp:ab12CD34'" % (origin, job))
+    assert "Copied" in pg.locator("#send-msg").inner_text()
+    assert pg.locator("#send-fallback").is_hidden()
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_send_details_stay_on_the_phone(browser, live_server):
+    pg = sliced(browser, live_server)
+    fill_printer(pg, ip="10.0.0.77", code="Zz9Yy8Xx", name="part")
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("window.__clip !== null")
+    for url, headers, body in pg.requests:   # never sent to the server, in any request
+        for secret in ("Zz9Yy8Xx", "10.0.0.77"):
+            assert secret not in url and secret not in headers and secret.encode() not in body
+    saved = json.loads(pg.evaluate("localStorage.getItem('image3d.printer')"))
+    assert saved == {"ip": "10.0.0.77", "code": "Zz9Yy8Xx", "name": "part"}
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    assert pg.input_value("#send-ip") == "10.0.0.77" and pg.input_value("#send-code") == "Zz9Yy8Xx"
+    assert pg.input_value("#send-name") == "part"
+    pg.context.close()
+
+
+def test_send_rejects_bad_details_without_copying(browser, live_server):
+    pg = sliced(browser, live_server)
+    cases = [("192.168.1", "ab12CD34", "x", "printer's IP address"),
+             ("192.168.1.300", "ab12CD34", "x", "printer's IP address"),
+             ("192.168.1.5", "ab 12'; rm", "x", "access code"),
+             ("192.168.1.5", "", "x", "access code")]
+    fill_printer(pg)
+    for ip, code, name, words in cases:
+        pg.fill("#send-ip", ip)
+        pg.fill("#send-code", code)
+        pg.fill("#send-name", name)
+        pg.locator("#btn-send-copy").tap()
+        assert words in pg.locator("#send-msg").inner_text()
+        assert pg.evaluate("window.__clip") is None
+    pg.context.close()
+
+
+def test_send_name_is_cleaned(browser, live_server):
+    pg = sliced(browser, live_server)
+    fill_printer(pg, name="My robot leg (v2)!.gcode.3mf")
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("window.__clip !== null")
+    assert pg.input_value("#send-name") == "My-robot-leg-v2"
+    assert "-o My-robot-leg-v2.gcode.3mf" in pg.evaluate("window.__clip")
+    pg.evaluate("window.__clip = null")
+    pg.fill("#send-name", "")
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("window.__clip !== null")
+    assert "-o model.gcode.3mf" in pg.evaluate("window.__clip")
+    pg.context.close()
+
+
+def test_send_refuses_a_site_passcode_it_cannot_quote(browser, live_server):
+    pg = sliced(browser, live_server)
+    fill_printer(pg)
+    for bad in ("it's", "a$b", "a\\b"):
+        pg.fill("#gen-pass", bad)
+        pg.locator("#btn-send-copy").tap()
+        assert "passcode" in pg.locator("#send-msg").inner_text()
+        assert pg.evaluate("window.__clip") is None
+    pg.context.close()
+
+
+def test_send_clipboard_blocked_shows_the_command_to_copy(browser, live_server):
+    pg = sliced(browser, live_server, CLIP_FAIL)
+    fill_printer(pg)
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("!document.getElementById('send-fallback').hidden")
+    assert pg.input_value("#send-fallback").startswith("curl --fail-early -fS ")
+    assert "copy it by hand" in pg.locator("#send-msg").inner_text()
+    pg.context.close()
+
+
+def test_send_shortcut_link_carries_only_name_and_job(browser, live_server):
+    pg = sliced(browser, live_server)
+    job = pg.evaluate("sessionStorage.getItem('image3d.slicejob')")
+    fill_printer(pg, name="robot-leg")
+    href = pg.get_attribute("#btn-send-shortcut", "href")
+    assert href == "shortcuts://run-shortcut?name=Send%20to%20P1S&input=text&text=" + "robot-leg%3A" + job
+    pg.fill("#send-name", "other")
+    assert pg.get_attribute("#btn-send-shortcut", "href").endswith("text=other%3A" + job)
+    pg.context.close()
+
+
+def test_send_shortcut_setup_text(browser, live_server):
+    pg = sliced(browser, live_server)
+    fill_printer(pg)
+    pg.locator("#btn-send-template").tap()
+    pg.wait_for_function("window.__clip !== null")
+    origin = live_server.rstrip("/")
+    assert pg.evaluate("window.__clip") == (
+        "curl --fail-early -fS -H 'X-Passcode: sesame' -o $1.gcode.3mf '%s/api/slice/$2/file' --next --insecure "
+        "--ftp-pasv -T $1.gcode.3mf 'ftps://192.168.1.50:990/$1.gcode.3mf' --user 'bblp:ab12CD34'" % origin)
+    pg.context.close()
+
+
+def test_send_hidden_with_the_result(browser, live_server):
+    pg = sliced(browser, live_server)
+    assert pg.locator("#send-box").is_visible()
+    pg.select_option("#slice-quality", "fine")
+    assert pg.locator("#send-box").is_hidden()
+    pg.context.close()
+
+
+@pytest.mark.skipif(not shutil.which("curl"), reason="needs curl")
+def test_send_command_runs_with_real_curl(browser, live_server, tmp_path):
+    # the copied command, run by a real curl: the FTPS address is swapped for a local file:// address (the FTPS part
+    # was proven on the printer on 2026-11-13); a wrong passcode must stop before anything is uploaded
+    import shlex
+    pg = sliced(browser, live_server)
+    fill_printer(pg, name="leg")
+    pg.locator("#btn-send-copy").tap()
+    pg.wait_for_function("window.__clip !== null")
+    args = shlex.split(pg.evaluate("window.__clip"))
+    pg.context.close()
+    assert args[0] == "curl"
+    dest = tmp_path / "printer" / "leg.gcode.3mf"
+    dest.parent.mkdir()
+    i = args.index("ftps://192.168.1.50:990/leg.gcode.3mf")
+    args[i] = dest.as_uri()
+    r = subprocess.run(args, cwd=str(tmp_path), capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    import zipfile
+    assert zipfile.ZipFile(str(dest)).namelist() == ["Metadata/plate_1.gcode"]
+    dest.unlink()
+    (tmp_path / "leg.gcode.3mf").unlink()
+    args[args.index("X-Passcode: sesame")] = "X-Passcode: wrong"
+    r = subprocess.run(args, cwd=str(tmp_path), capture_output=True, text=True, timeout=60)
+    assert r.returncode == 22 and not dest.exists()

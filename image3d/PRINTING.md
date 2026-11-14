@@ -23,6 +23,24 @@ The printer stays in normal cloud mode. Nothing here needs LAN-only mode or Deve
 2. Copy `model.gcode.3mf` onto the card.
 3. Put the card back in the printer and start the file from the printer's screen.
 
+**Easiest: "Send to printer from this phone" on the page (added 2026-11-14, not yet tried on the phone)**
+After a slice finishes, open "Send to printer from this phone" under Download print file. Enter the printer's IP address and access code (both on the printer's WLAN screen) and a name for the file on the printer. They are saved on this phone only and never sent to the server.
+- **Copy a-Shell command:** copies one line that fetches the slice from the site and uploads it to the printer. Open a-Shell, paste, press return. A progress line reaching 100% and no `curl:` error means it is on the printer. No download, no `pickFolder`.
+- **Send with Shortcut:** one tap, once the "Send to P1S" Shortcut below is set up.
+- The slice has to still be on the server: up to 30 minutes, less if the free server went to sleep. If you get `curl: (22) ... 404`, slice again.
+
+**Setting up the "Send to P1S" Shortcut (once, about 10 minutes)**
+1. On the page, fill in the printer details and tap **Copy Shortcut setup text**. It contains your access code: paste it only into the Shortcut.
+2. Open the Shortcuts app, tap **+**, and name the shortcut exactly `Send to P1S`.
+3. Add **Match Text**. Pattern: `^[A-Za-z0-9_-]{1,40}:[A-Za-z0-9_-]{6,32}$`. Text: **Shortcut Input**.
+4. Add **If**: **Matches** · **has any value**.
+5. Inside the If, add **Replace Text**. Tap the arrow to show more options and turn on **Regular Expression**. Find: `^([A-Za-z0-9_-]{1,40}):([A-Za-z0-9_-]{6,32})$`. Replace with: paste the setup text. In: **Shortcut Input**.
+6. Still inside the If, add a-Shell's **Execute Command** action (search "a-Shell" in the action list) and give it **Updated Text**.
+7. Under **Otherwise**, add **Show Alert** with the text "Not a print job from Image3D".
+8. Done. On the page, tap **Send with Shortcut**; allow Shortcuts and a-Shell when iOS asks the first time.
+
+Why it is built this way: the page hands the Shortcut only the file name and the slice number. The Shortcut checks that the input looks exactly like that before running anything, so no other web page can use it to run a command of its own. If the Execute Command action fails without opening a-Shell, try a-Shell's option to run the command inside the app (exact wording not checked yet).
+
 **B. Upload over home Wi-Fi from the phone (worked on Jacob's P1S on 2026-11-13, LAN-only and Developer Mode off)**
 The printer accepts file uploads by FTPS (FTP with implicit TLS) on port 990, user `bblp`, password = the access code on the printer's WLAN screen. What worked on the iPhone is the free app **a-Shell** and one `curl` command:
 1. Phone on the same Wi-Fi as the printer. A microSD card must be in the printer.

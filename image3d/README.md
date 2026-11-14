@@ -1,6 +1,6 @@
 # Image3D editor
 
-A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, mirror (make both sides match), and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone.
+A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, mirror (make both sides match), and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone. After slicing, "Send to printer from this phone" copies a one-line a-Shell command (or opens an iPhone Shortcut) that sends the print file to the P1S over Wi-Fi; see `PRINTING.md`.
 
 ## Two ways to use it
 
