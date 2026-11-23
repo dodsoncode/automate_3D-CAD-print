@@ -441,3 +441,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: branch `send-helpers` pushed; PR #13 opened to `main`. Not merged; waits for Jacob.
 - NEXT: Jacob - say when to merge; then SL9 (try the send box, set up the Shortcut).
 - BLOCKED: nothing for Claude.
+
+### 2026-11-23 - Merge of PR #13 and first phone send confirmed
+- DONE: PR #13 (send to printer) merged to `main` (95032b8) on 2026-11-14. Jacob generated an STL, sliced it, copied the a-Shell command from the send box and sent the file to the printer from his phone: confirmed by Jacob on real hardware that the send box and copied command work (he did not yet report the curl result line or the print outcome). The "Send to P1S" Shortcut is still untried (SL9).
+- DONE: Jacob started "page flow + A1" this week (replaces time on his bird color-by-number book); short design written: `docs/superpowers/specs/2026-11-23-page-flow-and-a1-design.md`; TASKS SL10, SL11 added.
+- NEXT: PR 1 (page flow), then the PR 2 A1 dropdown.
+- BLOCKED: nothing.
