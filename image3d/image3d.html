@@ -14,7 +14,6 @@
   #view-note { position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: #4a5a6e; pointer-events: none; }
   #tools { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 10px 12px 24px; -webkit-overflow-scrolling: touch; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #566478; margin: 14px 0 6px; }
-  h2:first-child { margin-top: 0; }
   .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .row > * { flex: 1 1 0; min-width: 0; }
   button, select, input[type=range], input[type=file], input[type=number], input[type=text], input[type=password] { min-height: 44px; font: inherit; }
@@ -35,8 +34,24 @@
   .chk.bad { background: #fbd5d5; color: #8a1c1c; }
   #msg { min-height: 22px; margin: 8px 0; font-weight: 500; }
   #msg.err { color: #a11; }
-  #howto, #gen-panel, #slice-panel { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 10px; margin-top: 14px; font-size: 15px; }
-  #howto a { display: inline-block; padding: 8px 0; color: #1257c4; word-break: break-all; }
+  #gen-panel, #slice-panel { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 10px; margin-top: 14px; font-size: 15px; }
+  #msg { position: sticky; top: 0; z-index: 2; background: #f3f5f8; }
+  #msg:empty { display: none; }
+  #pass-bar { background: #fff; border: 1px solid #d3dae4; border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; }
+  #pass-bar label { display: block; font-size: 13px; color: #566478; margin-bottom: 4px; }
+  #pass-bar[hidden], .step[hidden] { display: none; }
+  .step { margin-top: 18px; }
+  .step > h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 15px; color: #1c2430; text-transform: none; letter-spacing: 0; }
+  .step > h2 .num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 12px; background: #1f6feb; color: #fff; font-size: 13px; letter-spacing: 0; }
+  .step h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #566478; margin: 14px 0 6px; }
+  .step-lock { display: none; margin-bottom: 6px; }
+  .step.locked .step-lock { display: block; }
+  .step.locked > :not(h2):not(.step-lock) { opacity: .45; pointer-events: none; }
+  .step.locked > h2 .num { background: #8a97a8; }
+  #stl-row { margin-top: 10px; }
+  #step-1 > .row { margin-top: 10px; }
+  #send-wait { margin-bottom: 6px; }
+  #slice-result:not([hidden]) + #send-wait { display: none; }
   #gen-panel[hidden], #slice-panel[hidden], #slice-form[hidden], #slice-unavailable[hidden], #slice-result[hidden] { display: none; }
   .small { font-size: 13px; color: #566478; }
   #slice-panel label { display: block; font-size: 13px; color: #566478; margin: 8px 0 2px; }
@@ -61,34 +76,54 @@
 <div id="app">
   <div id="view"><span id="view-note">Drag to orbit, pinch to zoom, tap a piece to select</span></div>
   <div id="tools">
-    <h2>Open</h2>
-    <input type="file" id="file" accept=".glb,.obj,.stl" aria-label="Open a model file">
+    <div id="msg" role="status" aria-live="polite"></div>
+    <div id="pass-bar" hidden>
+      <label for="gen-pass">Passcode</label>
+      <input type="password" id="gen-pass" placeholder="Passcode" autocomplete="off" aria-label="Passcode">
+    </div>
 
-    <h2>Pieces</h2>
+    <section class="step" id="step-1">
+      <h2><span class="num">1</span>Get a model</h2>
+      <div id="gen-panel" hidden>
+      <strong>Generate from a photo</strong>
+      <div class="row" style="margin-top:8px"><input type="file" id="gen-photo" accept="image/*" aria-label="Photo"></div>
+      <div class="row"><button id="btn-generate" class="primary">Generate</button></div>
+      <div id="gen-status"></div>
+    </div>
+      <div class="row"><button id="btn-upload" title="Open a GLB, OBJ or STL file you already have">Upload GLB file</button></div>
+      <input type="file" id="file" accept=".glb,.obj,.stl" aria-label="Open a model file" hidden>
+    </section>
+
+    <section class="step locked" id="step-2">
+      <h2><span class="num">2</span>Edit</h2>
+      <div class="step-lock small">Load a model first.</div>
+    <h3>Pieces</h3>
     <div id="pieces"></div>
     <div class="row"><button id="btn-delete">Delete selected</button><button id="btn-keep-largest">Keep largest</button></div>
     <div class="row"><button id="btn-small">Remove tiny bits</button><button id="btn-undo" disabled>Undo</button></div>
 
-    <h2>Size (longest side, mm)</h2>
+    <h3>Size (longest side, mm)</h3>
     <div id="model-size"></div>
     <div class="row"><input type="number" id="size-mm" value="100" min="1" max="2000" step="1" inputmode="decimal" aria-label="Longest side in millimetres"><button id="btn-size" class="primary">Set size</button></div>
 
-    <h2>Orient</h2>
+    <h3>Orient</h3>
     <div class="row"><button id="btn-rot-x">Rotate X</button><button id="btn-rot-y">Rotate Y</button><button id="btn-rot-z">Rotate Z</button></div>
     <div class="row"><button id="btn-flat">Lay flat on bed</button></div>
 
-    <h2>Cut or mirror</h2>
+    <h3>Cut or mirror</h3>
     <div class="row"><select id="cut-axis" aria-label="Cut axis"><option value="x">Axis X</option><option value="y">Axis Y</option><option value="z" selected>Axis Z (height)</option></select>
       <select id="cut-keep" aria-label="Keep side"><option value="above">Keep above</option><option value="below">Keep below</option></select></div>
     <div class="row"><input type="range" id="cut-pos" min="0" max="100" step="0.1" value="50" aria-label="Cut position"><span id="cut-val" class="val" style="flex:0 0 76px">50 mm</span></div>
     <div class="row"><button id="btn-cut" class="primary">Cut</button><button id="btn-mirror" title="Keep this side and copy it across the plane, so both sides match">Mirror</button></div>
 
-    <h2>Checks</h2>
+    <h3>Checks</h3>
     <div><span id="chk-closed" class="chk">no model</span><span id="chk-bed" class="chk">bed</span><span id="chk-count" class="chk">0 pieces</span></div>
 
-    <div id="msg" role="status" aria-live="polite"></div>
-    <div class="row"><button id="btn-export" class="primary">Export STL</button></div>
+    </section>
 
+    <section class="step locked" id="step-3">
+      <h2><span class="num">3</span><span id="step3-name">Export</span></h2>
+      <div class="step-lock small">Load a model first.</div>
     <div id="slice-panel" hidden>
       <strong>Slice for P1S</strong>
       <div id="slice-unavailable" hidden>Slicer unavailable on this server</div>
@@ -102,41 +137,33 @@
         <div id="slice-hint" class="small"></div>
         <div id="slice-float" class="small" role="status"></div>
         <div id="slice-status" role="status" aria-live="polite"></div>
-        <div id="slice-result" hidden>
-          <div id="slice-line"></div>
-          <div class="small">Get the file onto the printer (microSD card, or send it below), then start it on the printer's screen with filament loaded. First print: watch the first layers.</div>
-          <button id="btn-slice-download" class="primary">Download print file</button>
-          <details id="send-box">
-            <summary>Send to printer from this phone</summary>
-            <div class="small">Needs the a-Shell app and the phone on the printer's Wi-Fi. These details stay on this phone; they are never sent to the server.</div>
-            <label for="send-ip">Printer IP address</label><input type="text" id="send-ip" inputmode="decimal" autocomplete="off" placeholder="192.168.1.50">
-            <label for="send-code">Printer access code</label><input type="password" id="send-code" autocomplete="off">
-            <label for="send-name">Name on the printer</label><input type="text" id="send-name" autocomplete="off" autocapitalize="off" placeholder="model">
-            <button id="btn-send-copy" class="primary">Copy a-Shell command</button>
-            <a id="btn-send-shortcut" class="btn" href="#">Send with Shortcut</a>
-            <button id="btn-send-template">Copy Shortcut setup text</button>
-            <textarea id="send-fallback" readonly hidden aria-label="Command to copy"></textarea>
-            <div id="send-msg" class="small" role="status" aria-live="polite"></div>
-          </details>
-        </div>
       </div>
     </div>
+      <div class="row" id="stl-row"><button id="btn-export">Export STL</button></div>
+    </section>
 
-    <div id="howto">
-      <strong>How to get a model</strong>
-      <p>Generate one from a photo on a free Hugging Face Space, download the GLB, then open it here.</p>
-      <a href="https://huggingface.co/spaces/tencent/Hunyuan3D-2.1" target="_blank" rel="noopener">Hunyuan3D-2.1 Space</a><br>
-      <a href="https://huggingface.co/spaces/trellis-community/TRELLIS" target="_blank" rel="noopener">TRELLIS Space</a>
+    <section class="step" id="step-4" hidden>
+      <h2><span class="num">4</span>Send</h2>
+    <div id="slice-result" hidden>
+      <div id="slice-line"></div>
+      <div class="small">Get the file onto the printer (microSD card, or send it below), then start it on the printer's screen with filament loaded. First print: watch the first layers.</div>
+      <button id="btn-slice-download" class="primary">Download print file</button>
+      <details id="send-box">
+        <summary>Send to printer from this phone</summary>
+        <div class="small">Needs the a-Shell app and the phone on the printer's Wi-Fi. These details stay on this phone; they are never sent to the server.</div>
+        <label for="send-ip">Printer IP address</label><input type="text" id="send-ip" inputmode="decimal" autocomplete="off" placeholder="192.168.1.50">
+        <label for="send-code">Printer access code</label><input type="password" id="send-code" autocomplete="off">
+        <label for="send-name">Name on the printer</label><input type="text" id="send-name" autocomplete="off" autocapitalize="off" placeholder="model">
+        <button id="btn-send-copy" class="primary">Copy a-Shell command</button>
+        <a id="btn-send-shortcut" class="btn" href="#">Send with Shortcut</a>
+        <button id="btn-send-template">Copy Shortcut setup text</button>
+        <textarea id="send-fallback" readonly hidden aria-label="Command to copy"></textarea>
+        <div id="send-msg" class="small" role="status" aria-live="polite"></div>
+      </details>
     </div>
-
-    <div id="gen-panel" hidden>
-      <strong>Generate from a photo</strong>
-      <div class="row" style="margin-top:8px"><input type="file" id="gen-photo" accept="image/*" aria-label="Photo"></div>
-      <div class="row"><input type="password" id="gen-pass" placeholder="Passcode" autocomplete="off" aria-label="Passcode"></div>
-      <div class="row"><button id="btn-generate" class="primary">Generate</button></div>
-      <div id="gen-status"></div>
-    </div>
-  </div>
+      <div id="send-wait" class="small">Slice a model first.</div>
+    </section>
+</div>
 </div>
 
 <script>/* three.min.js */
@@ -1997,6 +2024,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   function refresh() {
     cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); rebuildMeshes();
     $('btn-undo').disabled = !undoStack.length;
+    var has = state.model.length > 0;
+    $('step-2').classList.toggle('locked', !has); $('step-3').classList.toggle('locked', !has);
     modelChanged();
   }
   function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
@@ -2120,6 +2149,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   });
   $('btn-undo').addEventListener('click', undo);
   $('btn-export').addEventListener('click', doExport);
+  $('btn-upload').addEventListener('click', function () { $('file').click(); });
 
   // passcode is remembered on this device only
   try { var p = localStorage.getItem('image3d.pass'); if (p) $('gen-pass').value = p; } catch (e) { /* storage blocked */ }
@@ -2131,7 +2161,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     var ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 3000) : null;
     return fetch('api/health', ctl ? { signal: ctl.signal } : {})
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j && j.ok === true) { App.serverMode = true; $('gen-panel').hidden = false; $('howto').hidden = true; } })
+      .then(function (j) { if (j && j.ok === true) { App.serverMode = true; $('gen-panel').hidden = false; $('pass-bar').hidden = false; } })
       .catch(function () { /* not server mode */ })
       .then(function () { if (timer) clearTimeout(timer); })
       .then(function () { return App.serverMode ? loadSliceOptions() : null; });
@@ -2282,7 +2312,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       return { status: r.status, ok: r.ok, body: body };
     } finally { clearTimeout(t); }
   }
-  var NEED_PASS = 'Enter the passcode in the Generate section, then reload to get your slice';
+  var NEED_PASS = 'Enter the passcode at the top, then reload to get your slice';
   // follows one job until it finishes; network errors, timeouts and 5xx answers keep it polling (the free server may be
   // busy slicing). earlier: true when resuming a job saved before a reload.
   async function pollSlice(id, earlier) {
@@ -2319,7 +2349,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   $('btn-slice').addEventListener('click', function () {
     if (slicing || !sliceReady || !needModel()) return;
-    if (!$('gen-pass').value) { msg('Enter the passcode in the Generate section first', true); return; }
+    if (!$('gen-pass').value) { msg('Enter the passcode at the top first', true); return; }
     slicing = true; sliceStale = false; updateWake(); updateSliceControls(); hideSliceResult(); msg(''); sliceStatus('Sending the model...');
     var fd = new FormData();
     fd.append('model', new Blob([exportStl()], { type: 'model/stl' }), 'model.stl');
@@ -2373,7 +2403,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     var ip = $('send-ip').value.trim(), code = $('send-code').value.trim(), pass = $('gen-pass').value;
     if (!goodIp(ip)) return { err: "Enter the printer's IP address (WLAN screen on the printer), like 192.168.1.50" };
     if (!/^[A-Za-z0-9]{4,32}$/.test(code)) return { err: 'Enter the access code from the printer\'s WLAN screen (letters and numbers only)' };
-    if (!pass) return { err: 'Enter the passcode in the Generate section first' };
+    if (!pass) return { err: 'Enter the passcode at the top first' };
     if (/['$\\\x00-\x1f\x7f]/.test(pass)) return { err: "The site passcode has a ', $ or \\ in it, which the command cannot carry. Use Download print file instead." };
     return { ip: ip, code: code, pass: pass };
   }
@@ -2440,7 +2470,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         (sliceOpts[k] || []).forEach(function (o) { var e = document.createElement('option'); e.value = o.id; e.textContent = o.label; sel.appendChild(e); });
       });
       updatePlates(); sliceStatus('');
-      $('slice-form').hidden = false; sliceReady = true; updateSliceControls();
+      $('slice-form').hidden = false; $('step3-name').textContent = 'Slice'; $('step-4').hidden = false; sliceReady = true; updateSliceControls();
       var id = savedJob();
       if (id && !slicing) {
         sliceStale = state.model.length > 0;   // a model is already open: the saved file may not be for it, so it is discarded

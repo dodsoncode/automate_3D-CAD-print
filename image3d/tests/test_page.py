@@ -75,9 +75,8 @@ def test_loads_without_errors(page):
     assert page.evaluate("typeof I3DApp") == "object"
     assert page.evaluate("I3DApp.serverMode") is False
     assert not page.locator("#gen-panel").is_visible()
-    assert page.locator("#howto").is_visible()
-    assert "huggingface.co/spaces/tencent/Hunyuan3D-2.1" in page.locator("#howto").inner_html()
-    assert "huggingface.co/spaces/trellis-community/TRELLIS" in page.locator("#howto").inner_html()
+    assert page.locator("#howto").count() == 0
+    assert page.locator("#btn-upload").inner_text() == "Upload GLB file"
 
 
 def test_open_two_cubes_and_delete(page):
@@ -531,9 +530,9 @@ def test_slice_options_listed(browser, live_server):
     labels = pg.locator("#slice-filament option").all_inner_texts()
     assert len(labels) == 4 and "PLA Basic" in labels and "PLA Silk+" in labels
     assert pg.eval_on_selector("#slice-filament", "e => e.selectedOptions[0].textContent") == "PLA Basic"
-    # placement: below Export, above Generate
-    order = pg.evaluate("""['btn-export','slice-panel','gen-panel'].map(i => document.getElementById(i).getBoundingClientRect().top)""")
-    assert order == sorted(order)
+    # placement: passcode, then the numbered steps in order (see test_flow_runs_top_to_bottom)
+    order = pg.evaluate("""['pass-bar','gen-panel','step-2','slice-panel','slice-result','btn-export'].map(i => document.getElementById(i).getBoundingClientRect().top)""")
+    assert order[:4] == sorted(order[:4])
     assert pg.errors == []
     pg.context.close()
 
@@ -544,7 +543,7 @@ def test_slice_button_needs_a_model_and_passcode(browser, live_server):
     open_sample(pg, "two_cubes.stl", rows=2)
     assert pg.locator("#btn-slice").is_enabled()
     pg.locator("#btn-slice").tap()  # passcode field is empty
-    assert pg.locator("#msg").inner_text() == "Enter the passcode in the Generate section first"
+    assert pg.locator("#msg").inner_text() == "Enter the passcode at the top first"
     assert pg.locator("#btn-slice").is_enabled() and pg.locator("#slice-status").inner_text() == ""
     pg.context.close()
 
@@ -789,7 +788,7 @@ def test_status_401_keeps_the_saved_job_and_stops_polling(browser, live_server):
         return rf.apply(this, arguments);
       };""")
     pg.evaluate("window.__release()")
-    pg.wait_for_function("document.getElementById('msg').innerText === 'Enter the passcode in the Generate section, then reload to get your slice'")
+    pg.wait_for_function("document.getElementById('msg').innerText === 'Enter the passcode at the top, then reload to get your slice'")
     assert pg.locator("#msg.err").count() == 1
     assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is not None
     assert pg.locator("#slice-filament").is_enabled() and pg.locator("#slice-status").inner_text() == ""
@@ -812,7 +811,7 @@ def test_resume_with_an_empty_passcode_never_polls(browser, live_server):
     pg.reload()
     pg.wait_for_function("window.I3DApp")
     pg.evaluate("window.__release()")
-    pg.wait_for_function("document.getElementById('msg').innerText.startsWith('Enter the passcode in the Generate section')")
+    pg.wait_for_function("document.getElementById('msg').innerText.startsWith('Enter the passcode at the top')")
     assert pg.evaluate("window.__polls") == 0
     assert pg.evaluate("sessionStorage.getItem('image3d.slicejob')") is not None
     pg.context.close()
@@ -988,7 +987,7 @@ def test_mirror_at_the_edge_changes_nothing_and_says_why(page):
 
 
 def test_mirror_needs_a_model(page):
-    page.locator("#btn-mirror").tap()
+    page.locator("#btn-mirror").dispatch_event("click")   # the step is greyed (cannot be tapped); the button's own guard still answers
     assert page.locator("#msg").inner_text() != ""
     assert page.evaluate("I3DApp.state.model.length") == 0
 
@@ -1158,3 +1157,57 @@ def test_send_command_runs_with_real_curl(browser, live_server, tmp_path):
     args[args.index("X-Passcode: sesame")] = "X-Passcode: wrong"
     r = subprocess.run(args, cwd=str(tmp_path), capture_output=True, text=True, timeout=60)
     assert r.returncode == 22 and not dest.exists()
+
+
+# ---------- page flow: passcode at the top, steps 1-4 in order ----------
+def test_flow_runs_top_to_bottom(browser, live_server):
+    pg = new_page(browser, live_server)
+    titles = pg.evaluate("""[...document.querySelectorAll('.step > h2')].map(h => h.innerText.replace(/\\s+/g, ' ').trim())""")
+    assert titles == ["1 Get a model", "2 Edit", "3 Slice", "4 Send"]
+    tops = pg.evaluate("""['pass-bar','step-1','step-2','step-3','step-4'].map(i => document.getElementById(i).offsetTop)""")
+    assert tops == sorted(tops) and len(set(tops)) == 5
+    # the passcode box is the first thing in the tools area, and is the one box every step reads
+    assert pg.evaluate("document.querySelector('#tools').firstElementChild.id === 'msg' && document.querySelector('#tools').children[1].id") == "pass-bar"
+    assert pg.locator("#pass-bar #gen-pass").is_visible() and pg.locator("#gen-pass").count() == 1
+    # Generate and Upload GLB both live in step 1; Export STL is in step 3
+    assert pg.locator("#step-1 #btn-generate").is_visible() and pg.locator("#step-1 #btn-upload").is_visible()
+    assert pg.locator("#step-3 #btn-export").count() == 1 and pg.locator("#step-2 #btn-delete").count() == 1
+    pg.context.close()
+
+
+def test_steps_are_greyed_until_there_is_something_to_do(browser, live_server):
+    pg = new_page(browser, live_server)
+    assert pg.eval_on_selector("#step-2", "e => e.classList.contains('locked')")
+    assert pg.eval_on_selector("#step-3", "e => e.classList.contains('locked')")
+    assert pg.locator("#step-2 .step-lock").inner_text() == "Load a model first."
+    assert pg.locator("#send-wait").inner_text() == "Slice a model first." and pg.locator("#send-wait").is_visible()
+    assert pg.locator("#slice-result").is_hidden()
+    open_sample(pg, "two_cubes.stl", rows=2)
+    assert not pg.eval_on_selector("#step-2", "e => e.classList.contains('locked')")
+    assert not pg.eval_on_selector("#step-3", "e => e.classList.contains('locked')")
+    assert not pg.locator("#step-2 .step-lock").is_visible()
+    pg.context.close()
+
+
+def test_upload_button_opens_the_file_picker(page):
+    with page.expect_file_chooser() as fc:
+        page.locator("#btn-upload").tap()
+    assert fc.value.is_multiple() is False
+    assert page.eval_on_selector("#file", "e => e.accept") == ".glb,.obj,.stl"
+
+
+def test_without_a_server_no_passcode_slice_or_send(page):
+    assert page.locator("#pass-bar").is_hidden() and page.locator("#step-4").is_hidden()
+    assert page.locator("#step3-name").inner_text() == "Export"
+    open_sample(page, "two_cubes.stl", rows=2)
+    assert page.locator("#btn-export").is_visible()
+
+
+def test_send_step_waits_for_a_slice_then_shows_the_result(browser, live_server, slice_files):
+    pg = slice_page(browser, live_server, WAKE)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    assert pg.locator("#send-wait").is_hidden()
+    assert pg.locator("#step-4 #btn-slice-download").is_visible()
+    pg.context.close()

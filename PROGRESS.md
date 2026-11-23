@@ -447,3 +447,10 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: Jacob started "page flow + A1" this week (replaces time on his bird color-by-number book); short design written: `docs/superpowers/specs/2026-11-23-page-flow-and-a1-design.md`; TASKS SL10, SL11 added.
 - NEXT: PR 1 (page flow), then the PR 2 A1 dropdown.
 - BLOCKED: nothing.
+
+### 2026-11-23 - Page flow (PR 1 of 2): passcode at the top, numbered steps
+- DONE: `image3d/index.html` reshaped in place (design: `docs/superpowers/specs/2026-11-23-page-flow-and-a1-design.md`). Passcode box at the top. 1 Get a model (Generate from photo; "Upload GLB file" button opens the file picker, GLB/OBJ/STL). 2 Edit. 3 Slice, with Export STL. 4 Send (the result, download, a-Shell command, Shortcut). Steps 2-3 greyed with "Load a model first." until a model is open; step 4 says "Slice a model first." until a slice exists. Messages (`#msg`) stick to the top of the scroll area. No server (Claude artifact): no passcode, Slice or Send; step 3 reads "Export". Hugging Face how-to links removed. Passcode warnings now say "at the top". Every existing element id kept. `PRINTING.md`, `DEPLOY.md`, `README.md`, `image3d/PROGRESS.md` (Step 25) updated; `image3d.html` rebuilt.
+- Tests: 5 new page tests (order of the steps and passcode first, greyed states, Upload button opens the picker, artifact mode, Send step waits for a slice); old tests updated (howto gone, passcode wording, step order, Mirror guard clicked directly because a greyed step cannot be tapped). `python -m pytest -q image3d/tests gui/tests`: 382 passed. Looked at the page at phone size (390 px) in a desktop browser.
+- NOT verified: a real phone (iOS Safari); a real generated model through the new layout. Not yet tried: whether the greyed steps feel clear in use.
+- NEXT: PR to `main`; Jacob says when to merge and looks at it on the phone (SL12). Then PR 2: Printer dropdown (P1S, A1, A1 mini; SL11).
+- BLOCKED: nothing.

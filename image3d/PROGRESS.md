@@ -171,6 +171,9 @@ second **free Render** service next to the mental fitness app.
 ### Step 24 - Send to printer from the phone (2026-11-14)
 - Slice result gains "Send to printer from this phone": printer IP, access code and name kept on the phone only; "Copy a-Shell command" (one curl call: fetch from the site, then FTPS upload), "Send with Shortcut" (passes only name:job to the "Send to P1S" Shortcut), "Copy Shortcut setup text". 10 page tests written first, one of them runs the command with a real curl. Details in the root `PROGRESS.md`.
 
+### Step 25 - Page flow: passcode at the top, steps 1-4 (2026-11-23)
+- Passcode box moved to the top (one box for Generate, Slice and Send). Numbered steps: 1 Get a model (Generate from photo, plus an "Upload GLB file" button that opens the file picker), 2 Edit, 3 Slice (with Export STL), 4 Send (download, a-Shell command, Shortcut). Steps 2-3 are greyed with "Load a model first" until a model is open; step 4 says "Slice a model first" until a slice exists. Without a server (the Claude artifact) there is no passcode, Slice or Send and step 3 reads "Export". Hugging Face how-to links removed. Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
 
 1. **SL9 - try the send box:** after the next merge and redeploy, slice, open "Send to printer from this phone", fill it in, tap Copy a-Shell command, paste into a-Shell. Then set up the Shortcut ([`PRINTING.md`](PRINTING.md)) and try Send with Shortcut.
