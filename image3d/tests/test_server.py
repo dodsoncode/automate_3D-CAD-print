@@ -810,35 +810,36 @@ def test_a_150k_triangle_model_fits_the_body_cap():
     assert 84 + 50 * slicing.MAX_TRIANGLES < server.MAX_BYTES
 
 
-# ---------- printer choice: P1S (default), A1, A1 mini ----------
+# ---------- printer choice: P1S (default) and A1 ----------
 def test_options_list_the_printers(client, slicer):
     body = client.get("/api/slice/options").json()
     assert body["printers"] == [{"id": "p1s", "label": "Bambu P1S", "bed_mm": 256},
-                                {"id": "a1", "label": "Bambu A1", "bed_mm": 256},
-                                {"id": "a1m", "label": "Bambu A1 mini", "bed_mm": 180}]
+                                {"id": "a1", "label": "Bambu A1", "bed_mm": 256}]
     assert body["default_printer"] == "p1s"
     assert set(body["options"]) == {"filament", "quality", "plate", "supports"}   # printers are not one of the four
 
 
 def test_slice_passes_the_printer_to_the_slicer(client, slicer):
-    start_and_finish(client, printer="a1m", filament="petg_hf")
-    assert slicer.calls[0][1] == {"printer": "a1m", "filament": "petg_hf"}
+    start_and_finish(client, printer="a1", filament="petg_hf")
+    assert slicer.calls[0][1] == {"printer": "a1", "filament": "petg_hf"}
     start_and_finish(client, printer="p1s")
     assert slicer.calls[1][1] == {"printer": "p1s"}
 
 
 def test_unknown_printer_is_a_400_before_queueing(client, slicer):
-    r = slice_post(client, printer="x1c")
-    assert r.status_code == 400 and "unknown printer option: x1c" in r.json()["detail"]
+    for bad in ("x1c", "a1m"):
+        r = slice_post(client, printer=bad)
+        assert r.status_code == 400 and "unknown printer option: " + bad in r.json()["detail"]
     assert server._jobs == {} and slicer.calls == []
 
 
-def test_the_bed_check_follows_the_printer(client, slicer):
+def test_the_bed_check_follows_the_printer(client, slicer, monkeypatch):
     import struct
+    monkeypatch.setattr(slicing, "PRINTERS", slicing.PRINTERS + [dict(slicing.PRINTERS[1], id="t180", bed_mm=180)])
     tris = [((0, 0, 0), (200, 0, 0), (0, 20, 20))]
     data = bytearray(b"t".ljust(80, b"\0") + struct.pack("<I", 1))
     data += struct.pack("<12fH", 0, 0, 0, *[c for v in tris[0] for c in v], 0)
-    r = slice_post(client, data=bytes(data), printer="a1m")
+    r = slice_post(client, data=bytes(data), printer="t180")
     assert r.status_code == 400 and "does not fit the 180 mm bed" in r.json()["detail"]
     assert slice_post(client, data=bytes(data), printer="a1").status_code == 202
     finish()

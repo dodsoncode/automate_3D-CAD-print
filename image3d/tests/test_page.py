@@ -569,7 +569,7 @@ def test_slice_flow_downloads_file(browser, live_server, slice_files):
     assert d.value.suggested_filename == "model.gcode.3mf"
     import zipfile
     assert zipfile.ZipFile(d.value.path()).namelist() == ["Metadata/plate_1.gcode"]
-    assert json.load(open(slice_files[1])) == {"filament": "pla_silk_plus", "quality": "standard", "plate": "textured_pei", "supports": "tree"}
+    assert json.load(open(slice_files[1])) == {"printer": "p1s", "filament": "pla_silk_plus", "quality": "standard", "plate": "textured_pei", "supports": "tree"}
     assert pg.errors == []
     pg.context.close()
 
@@ -1210,4 +1210,128 @@ def test_send_step_waits_for_a_slice_then_shows_the_result(browser, live_server,
     pg.wait_for_function("!document.getElementById('slice-result').hidden")
     assert pg.locator("#send-wait").is_hidden()
     assert pg.locator("#step-4 #btn-slice-download").is_visible()
+    pg.context.close()
+
+
+# ---------- printer choice: P1S (default) and A1 ----------
+def test_printer_select_lists_the_printers_first_in_the_slice_panel(browser, live_server):
+    pg = new_page(browser, live_server)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    assert pg.eval_on_selector_all("#slice-printer option", "o => o.map(e => [e.value, e.textContent])") == [
+        ["p1s", "Bambu P1S"], ["a1", "Bambu A1"]]
+    assert pg.input_value("#slice-printer") == "p1s"
+    assert pg.evaluate("document.querySelector('#slice-form select').id") == "slice-printer"
+    assert pg.locator("#slice-title").inner_text() == "Slice for P1S"
+    assert pg.locator("#slice-sub").inner_text() == "Bambu P1S, 0.4 mm nozzle"
+    pg.select_option("#slice-printer", "a1")
+    assert pg.locator("#slice-title").inner_text() == "Slice for A1"
+    assert pg.locator("#slice-sub").inner_text() == "Bambu A1, 0.4 mm nozzle"
+    pg.context.close()
+
+
+def test_slice_sends_the_chosen_printer(browser, live_server, slice_files):
+    pg = slice_page(browser, live_server, WAKE)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.select_option("#slice-printer", "a1")
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+    assert json.load(open(slice_files[1]))["printer"] == "a1"
+    pg.context.close()
+
+
+def test_the_chosen_printer_is_remembered(browser, live_server):
+    pg = new_page(browser, live_server)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    pg.select_option("#slice-printer", "a1")
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    assert pg.input_value("#slice-printer") == "a1" and pg.locator("#slice-title").inner_text() == "Slice for A1"
+    pg.context.close()
+
+
+SMALL_BED = """
+window.__realFetch = window.fetch;
+window.fetch = function (u, o) {
+  var p = window.__realFetch.apply(this, arguments);
+  if (String(u) !== 'api/slice/options') return p;
+  return p.then(function (r) { return r.json().then(function (j) {
+    j.printers.push({id: 't180', label: 'Bambu Test 180', bed_mm: 180});
+    return new Response(JSON.stringify(j), {status: 200, headers: {'content-type': 'application/json'}});
+  }); });
+};
+"""   # the server offers two 256 mm printers; this adds a third with a 180 mm bed to the options the page receives
+
+
+def test_bed_check_and_grid_follow_the_printer(browser, live_server):
+    pg = new_page(browser, live_server, SMALL_BED)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    assert pg.locator("#chk-bed").inner_text() == "Fits 256 mm bed" and pg.evaluate("I3DApp.bed") == 256
+    pg.select_option("#slice-printer", "t180")
+    assert pg.locator("#chk-bed").inner_text() == "Fits 180 mm bed" and pg.evaluate("I3DApp.bed") == 180
+    assert pg.locator("#slice-title").inner_text() == "Slice for Test 180"
+    pg.select_option("#slice-printer", "a1")
+    assert pg.locator("#chk-bed").inner_text() == "Fits 256 mm bed" and pg.evaluate("I3DApp.bed") == 256
+    pg.context.close()
+
+
+def test_big_model_is_too_big_for_the_small_bed_only(browser, live_server):
+    pg = new_page(browser, live_server, SMALL_BED)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    pg.fill("#size-mm", "200")
+    pg.locator("#btn-size").tap()
+    pg.wait_for_function("I3DApp.state.model.length > 0 && document.getElementById('chk-bed').textContent.indexOf('Fits') === 0")
+    pg.select_option("#slice-printer", "t180")
+    assert pg.locator("#chk-bed").inner_text() == "Too big for 180 mm bed"
+    pg.select_option("#slice-printer", "p1s")
+    assert pg.locator("#chk-bed").inner_text() == "Fits 256 mm bed"
+    pg.context.close()
+
+
+def slice_with(pg, printer):
+    """Chooses a printer, slices, and fills the send box for it (the result, and so the box, is hidden after any change)."""
+    pg.select_option("#slice-printer", printer)
+    pg.locator("#btn-slice").tap()
+    pg.wait_for_function("!document.getElementById('slice-result').hidden")
+
+
+def test_send_details_are_kept_per_printer_and_the_shortcut_is_named_for_it(browser, live_server):
+    pg = sliced(browser, live_server)                       # sliced for the P1S
+    fill_printer(pg, "192.168.1.50", "p1scode1", "p1s-part")
+    assert "name=Send%20to%20P1S&" in pg.get_attribute("#btn-send-shortcut", "href")
+    slice_with(pg, "a1")
+    assert pg.input_value("#send-ip") == "" and pg.input_value("#send-code") == ""      # nothing saved for the A1 yet
+    assert pg.locator("#send-ip").is_visible()               # the box stays open between slices
+    for sel, val in (("#send-ip", "192.168.1.60"), ("#send-code", "a1code22"), ("#send-name", "a1-part")):
+        pg.fill(sel, val)
+    assert "name=Send%20to%20A1&" in pg.get_attribute("#btn-send-shortcut", "href")
+    pg.select_option("#slice-printer", "p1s")
+    assert pg.input_value("#send-ip") == "192.168.1.50" and pg.input_value("#send-code") == "p1scode1"
+    assert pg.input_value("#send-name") == "p1s-part"
+    pg.select_option("#slice-printer", "a1")
+    assert pg.input_value("#send-ip") == "192.168.1.60" and pg.input_value("#send-code") == "a1code22"
+    pg.context.close()
+
+
+def test_the_old_single_printer_details_become_the_p1s_ones(browser, live_server):
+    init = "localStorage.setItem('image3d.printer', JSON.stringify({ip: '192.168.1.7', code: 'oldcode9', name: 'robot'}));"
+    pg = new_page(browser, live_server, init)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    assert pg.input_value("#send-ip") == "192.168.1.7" and pg.input_value("#send-name") == "robot"
+    pg.select_option("#slice-printer", "a1")
+    assert pg.input_value("#send-ip") == ""
+    pg.context.close()
+
+
+def test_the_shortcut_setup_text_message_names_the_printers_shortcut(browser, live_server):
+    pg = slice_page(browser, live_server, CLIP)
+    pg.wait_for_selector("#slice-form:not([hidden])")
+    open_sample(pg, "two_cubes.stl", rows=2)
+    slice_with(pg, "a1")
+    fill_printer(pg, "192.168.1.60", "a1code22", "a1-part")
+    pg.locator("#btn-send-template").tap()
+    assert '"Send to A1" Shortcut' in pg.locator("#send-msg").inner_text()
     pg.context.close()

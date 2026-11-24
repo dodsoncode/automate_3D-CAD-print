@@ -288,7 +288,7 @@ def root():
     return FileResponse(os.path.join(HERE, "image3d.html"), media_type="text/html")
 
 
-# ---------- Slice for a Bambu printer (P1S, A1, A1 mini): one background job at a time ----------
+# ---------- Slice for a Bambu printer (P1S, A1): one background job at a time ----------
 SLICER = slicing.run_slice  # tests replace this: (prepared stl bytes, choice dict, workdir, prepared=info) -> (path, summary)
 SLICER_AVAILABLE = slicing.available  # tests replace this
 JOB_KEEP_S = 1800  # a finished job (and its file) stays this long (less if the free server sleeps or restarts)

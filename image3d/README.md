@@ -1,6 +1,6 @@
 # Image3D editor
 
-A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, mirror (make both sides match), and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone. After slicing, "Send to printer from this phone" copies a one-line a-Shell command (or opens an iPhone Shortcut) that sends the print file to the P1S over Wi-Fi; see `PRINTING.md`.
+A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize, orient, cut, mirror (make both sides match), and export a printable STL. The goal is photo -> 3D model -> clean it up -> STL for the printer, all from a phone. After slicing, "Send to printer from this phone" copies a one-line a-Shell command (or opens an iPhone Shortcut) that sends the print file to the printer (P1S or A1) over Wi-Fi; see `PRINTING.md`.
 
 ## Two ways to use it
 
@@ -31,8 +31,8 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 - `python -m pytest -q image3d/tests` (the browser tests at 390 px wide need Playwright + Chromium).
 - Everything incl. existing tests: `python -m pytest -q image3d/tests gui/tests && (cd firmware && python -m pytest -q)`.
 
-## Slice for P1S (Render version only)
-Step 3 of the page (Slice) turns the current model into `model.gcode.3mf` for a Bambu P1S (0.4 mm nozzle): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles. Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement; that figure adds two separate processes from a direct run and is not the server's real footprint on Render).
+## Slice for P1S or A1 (Render version only)
+Step 3 of the page (Slice) turns the current model into `model.gcode.3mf` for a Bambu P1S or A1 (0.4 mm nozzle; choose the Printer first, the page remembers it): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles. Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement; that figure adds two separate processes from a direct run and is not the server's real footprint on Render).
 
 ## Verification status
 
@@ -40,6 +40,6 @@ Step 3 of the page (Slice) turns the current model into `model.gcode.3mf` for a 
 - Editor page: tested in a desktop browser at phone size (Playwright), NOT on a real phone.
 - Server: tested with a FAKE generator and a fake `gradio_client`; the real Hugging Face call was run once from Claude's workspace on 2026-11-11 (default Space) and the resulting model opened and cut cleanly.
 - Render deploy and generation on a phone: Jacob reported on 2026-11-12 that they work well (TI6, TI7). Details of what he tried are not recorded.
-- Slice for P1S: the slicer core (`slicing.py`) is script-checked with the real OrcaSlicer engine in Claude's workspace. The server is tested with a fake slicer, plus real end-to-end runs through the real server (`tests/e2e_slice.py`; 124,500-triangle model in 15.6 s with 2 CPU cores here, 368 MB peak for the engine process). The page is tested in a desktop browser at phone size with a fake slicer.
+- Slice for P1S and A1: the A1 is checked with the real engine on a small cube and a supported shelf model for every filament and plate (not printed on a real A1). The A1 mini is deliberately not offered: Bambu's pinned mini profile purges out to Y=200 mm on a 180 mm bed and our move check refuses it. The slicer core (`slicing.py`) is script-checked with the real OrcaSlicer engine in Claude's workspace. The server is tested with a fake slicer, plus real end-to-end runs through the real server (`tests/e2e_slice.py`; 124,500-triangle model in 15.6 s with 2 CPU cores here, 368 MB peak for the engine process). The page is tested in a desktop browser at phone size with a fake slicer.
 - NOT verified: the slicer on Render, a real phone for the slice section, any print, and the artifact's `model.zip` download inside the real Claude app.
 - Open for Jacob: SL4 (redeploy and check the slicer is available), SL5 (first small test print, watched) and SL3 (FTPS upload test). See `../TASKS.md`.

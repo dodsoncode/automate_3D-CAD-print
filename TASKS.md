@@ -114,7 +114,9 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] SL9 (J) Try "Copy a-Shell command" on the phone, then set up the Shortcut and try "Send with Shortcut" (`image3d/PRINTING.md`)
 - [x] SL10 (C) Page flow: passcode at top, numbered steps 1-4, "Upload GLB file" button (design `docs/superpowers/specs/2026-11-23-page-flow-and-a1-design.md`) - desktop-tested 2026-11-23
 - [ ] SL12 (J) Look at the new page flow on the phone (after merge and redeploy); say what is still awkward
-- [ ] SL11 (C) Printer dropdown: P1S, A1, A1 mini (after SL10 is seen on the phone)
+- [x] SL11 (C) Printer dropdown: P1S and A1 - script-checked with the real engine 2026-11-24 (A1 mini deliberately not offered: see PROGRESS.md)
+- [ ] SL13 (J) First A1 slice, send and print (A1 has its own IP and access code; Shortcut "Send to A1" is separate)
+- [ ] (parked) A1 mini: needs a start G-code that stays inside the 180 mm bed, verified on a real mini
 
 ### Parked (Jacob, 2026-11-13)
 - Brim option on the slice panel (small parts came loose on the first print)

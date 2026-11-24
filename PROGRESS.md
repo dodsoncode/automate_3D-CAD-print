@@ -462,3 +462,11 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests: 13 new slicing tests and 4 new server tests written first; `test_slicing.py` 194 passed, `test_server.py` passed. Not yet run: the full suite, the page.
 - NEXT: page (Printer dropdown, per-printer saved IP/code, title and send box naming the printer), docs, PR.
 - BLOCKED: nothing. NOT verified on a real A1 (no A1 print yet).
+
+### 2026-11-24 - A1 support (PR 2 of 2): Printer dropdown with P1S and A1
+- DONE: page: a **Printer** dropdown first in step 3 (P1S default, A1), remembered on the phone. It sets the slice title and subtitle, the bed size (3D grid and the "Fits N mm bed" chip), the saved send details (IP, access code, file name kept per printer; the P1S keeps the key the page always used) and the Shortcut name (`Send to P1S` / `Send to A1`, so each printer can have its own Shortcut with its own address and code). The printer is sent as the `printer` form field. `PRINTING.md`, `README.md`, `image3d/PROGRESS.md` (Step 26) and the design doc updated; TASKS SL11 done, SL13 added.
+- DECISION: the **A1 mini is not offered**. Real-engine check 2026-11-24: Bambu's pinned A1 mini profile reuses the A1 start sequence, which draws its purge line out to Y=200 mm on a 180 mm bed; our move check refuses the file ("extruding move outside the bed (X10.1 Y200.0)"). Shipping it would mean trusting a start sequence nobody has verified on a mini. Parked in TASKS. A real-engine test (`test_a1_mini_start_sequence_is_refused`) records why.
+- Tests (written first): slicing 13 new (table, profile names, bed/corner/model checks, labels, real-engine A1 slice with supports and every filament x plate), server 4 new, page 8 new; `python -m pytest -q image3d/tests gui/tests`: 407 passed. Real-engine facts (script-checked): A1 has no excluded corner, bed 256, one unsupported pair (PETG HF on Cool Plate), same as the P1S.
+- NOT verified: anything on a real A1 (no A1 print yet; its start sequence, AMS-lite behaviour and the files starting on it); the page on a real phone. The A1 filament/process profile names were checked by the real engine, not by a print.
+- NEXT: Jacob merges when ready, looks at it on the phone, then SL13 (first A1 slice, send, print). Open from before: SL5, SL7, SL9, SL12.
+- BLOCKED: nothing.

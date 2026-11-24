@@ -1,4 +1,4 @@
-"""Slice core: turns a binary STL into a Bambu Lab print file (.gcode.3mf: P1S, A1 or A1 mini, 0.4 mm nozzle) with the
+"""Slice core: turns a binary STL into a Bambu Lab print file (.gcode.3mf: P1S or A1, 0.4 mm nozzle) with the
 OrcaSlicer engine.
 
 The engine runs in a separate Node process (slicer/slice_job.js, installed by slicer/install.sh). Nothing here
@@ -40,7 +40,8 @@ def _row(id_, label, profile):
     return {"id": id_, "label": label, "profile": profile}
 
 
-# The printers the page offers; the first is the default. bed_mm and corner come from Bambu's machine profiles
+# The printers the page offers; the first is the default. Not offered: the A1 mini (its pinned OrcaSlicer profile reuses
+# the A1 start sequence, which purges out to Y=200 on a 180 mm bed; the move check refuses it. Needs a verified start G-code). bed_mm and corner come from Bambu's machine profiles
 # (printable_area, bed_exclude_area; corner = (x, y) size of the blocked front-left area, None for no such area).
 # filament_tag / quality_tag: the part of Bambu's filament / process profile names that differs per printer (the
 # OPTIONS rows below hold the P1S names; checked against the real profiles with the real engine for all three).
@@ -49,8 +50,6 @@ PRINTERS = [
      "bed_mm": 256, "corner": (18.0, 28.0), "filament_tag": "P1S 0.4 nozzle", "quality_tag": "X1C"},
     {"id": "a1", "label": "Bambu A1", "model": "Bambu Lab A1", "machine": "Bambu Lab A1 0.4 nozzle",
      "bed_mm": 256, "corner": None, "filament_tag": "A1", "quality_tag": "A1"},
-    {"id": "a1m", "label": "Bambu A1 mini", "model": "Bambu Lab A1 mini", "machine": "Bambu Lab A1 mini 0.4 nozzle",
-     "bed_mm": 180, "corner": None, "filament_tag": "A1M", "quality_tag": "A1M"},
 ]
 P1S_FILAMENT_TAG, P1S_QUALITY_TAG = "P1S 0.4 nozzle", "X1C"
 

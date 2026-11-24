@@ -9,7 +9,7 @@ wants the app to serve his Bambu A1 printers, not only the P1S.
 
 ## Goals
 - PR 1 (first, about 3-4 h): one clear top-to-bottom flow with numbered steps.
-- PR 2 (after Jacob has seen PR 1 on his phone, about 5-7 h): a Printer dropdown (P1S, A1, A1 mini).
+- PR 2 (after Jacob has seen PR 1 on his phone, about 5-7 h): a Printer dropdown (P1S, A1; the A1 mini was tried and is deferred, see below).
 
 ## Non-goals / anti-goals
 - No framework, no wizard that hides later steps (it adds taps and hides the order).
@@ -34,10 +34,17 @@ wants the app to serve his Bambu A1 printers, not only the P1S.
 - Claude's calls (not Jacob's): drop the Hugging Face how-to links (he only uses Generate); passcode leaves the
   Generate panel.
 
-## PR 2 design (to confirm after PR 1)
+## PR 2 design (decided 2026-11-24; Jacob said "start the A1 integration")
 Bambu's pinned profiles already hold A1 and A1 mini 0.4 mm machine, `... @BBL A1` / `@BBL A1M` filament and process
 profiles. The A1 bed is 256 mm with no excluded corner; the A1 mini bed is smaller. The page and send box name the
 chosen printer. Uploads use the same FTPS port 990. Not verified on a real A1 until Jacob prints one.
 
 ## Left to the builder
 Exact wording, spacing and greyed styling; test layout.
+
+### What the real engine showed (2026-11-24)
+A1: 0.4 mm profiles slice cleanly for all four filaments and three plates; no excluded corner; same one unsupported
+pair (PETG HF on the Cool Plate) as the P1S. A1 mini: the pinned profile uses the same start sequence as the A1, which
+draws its purge line out to Y=200 mm on a 180 mm bed; the move check refuses it. So the mini is NOT offered until a
+start G-code for it is known to be right on a real mini. Per-printer saved IP/access code/file name and a per-printer
+Shortcut name ("Send to P1S", "Send to A1") were added because the printers have different addresses and codes.
