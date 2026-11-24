@@ -454,3 +454,11 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT verified: a real phone (iOS Safari); a real generated model through the new layout. Not yet tried: whether the greyed steps feel clear in use.
 - NEXT: PR to `main`; Jacob says when to merge and looks at it on the phone (SL12). Then PR 2: Printer dropdown (P1S, A1, A1 mini; SL11).
 - BLOCKED: nothing.
+
+### 2026-11-24 - PR #14 merged; A1 support, step 1 of 3: slicing core and server
+- DONE: PR #14 (page flow) merged to `main` (c73d0b1) at Jacob's request. Branch `printer-dropdown`.
+- DONE: `image3d/slicing.py` has a `PRINTERS` table (P1S default, A1, A1 mini; 0.4 mm nozzle): machine profile, printer model string, bed (256 / 256 / 180 mm), the P1S-only blocked front-left corner, and the per-printer part of Bambu's filament and quality profile names. `settings_for`, `prepare_stl` (model centred on that bed, size limit = that bed) and `check_gcode` (printer model, bed bounds, corner) all follow the chosen printer. `server.py`: `/api/slice` takes a `printer` form field (unknown is a 400 before queueing); `/api/slice/options` lists `printers` and `default_printer`. The result summary names the printer.
+- Real-engine facts (script-checked 2026-11-24 with the installed OrcaSlicer on a small cube, all 4 filaments x 3 plates on A1 and A1 mini): printer_model, nozzle and bed area are as the table says; no bed exclusion area on either; the only plate/filament pair with a 0 bed temperature is PETG HF on the Cool Plate, the same pair as on the P1S (so `INCOMPATIBLE` is shared).
+- Tests: 13 new slicing tests and 4 new server tests written first; `test_slicing.py` 194 passed, `test_server.py` passed. Not yet run: the full suite, the page.
+- NEXT: page (Printer dropdown, per-printer saved IP/code, title and send box naming the printer), docs, PR.
+- BLOCKED: nothing. NOT verified on a real A1 (no A1 print yet).

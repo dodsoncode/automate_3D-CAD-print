@@ -980,3 +980,107 @@ def test_real_engine_refuses_petg_on_cool_plate_before_slicing(tmp_path):
                           str(tmp_path))
     assert e.value.status == 400 and "cannot be printed on the Cool Plate" in str(e.value)
     assert not os.path.exists(tmp_path / "model.stl")
+
+
+# ---------- printers: Bambu P1S (default), A1 and A1 mini ----------
+A1_FIL = "Bambu PLA Basic @BBL A1"
+
+
+def a1_gcode(printer="Bambu Lab A1", suffix="A1", **kw):
+    kw.setdefault("filament", "Bambu PLA Basic @BBL " + suffix)
+    kw.setdefault("process", "0.20mm Standard @BBL " + suffix)
+    return gcode(printer=printer, **kw)
+
+
+def test_printers_table():
+    assert [p["id"] for p in slicing.PRINTERS] == ["p1s", "a1", "a1m"]
+    assert [(p["bed_mm"], p["model"]) for p in slicing.PRINTERS] == [
+        (256, "Bambu Lab P1S"), (256, "Bambu Lab A1"), (180, "Bambu Lab A1 mini")]
+    assert [p["label"] for p in slicing.PRINTERS] == ["Bambu P1S", "Bambu A1", "Bambu A1 mini"]
+    assert slicing.PRINTERS[0]["id"] == "p1s"            # the first one is the default
+    assert [p["corner"] for p in slicing.PRINTERS] == [(18.0, 28.0), None, None]
+
+
+@pytest.mark.parametrize("pid,machine,suffix", [("a1", "Bambu Lab A1 0.4 nozzle", "A1"),
+                                                  ("a1m", "Bambu Lab A1 mini 0.4 nozzle", "A1M")])
+def test_settings_for_a1_family(pid, machine, suffix):
+    s = slicing.settings_for({"printer": pid})
+    assert s["printer"] == machine and s["printer_id"] == pid
+    assert s["filament"] == "Bambu PLA Basic @BBL " + suffix
+    assert s["process"] == "0.20mm Standard @BBL " + suffix
+    s = slicing.settings_for({"printer": pid, "filament": "petg_hf", "quality": "draft", "plate": "smooth_pei"})
+    assert s["filament"] == "Bambu PETG HF @BBL " + suffix
+    assert s["process"] == "0.28mm Extra Draft @BBL " + suffix
+    assert s["options"]["curr_bed_type"] == "High Temp Plate"
+    for filament, name in (("pla_silk_plus", "PLA Silk+"), ("pla_matte", "PLA Matte")):
+        assert slicing.settings_for({"printer": pid, "filament": filament})["filament"] == "Bambu %s @BBL %s" % (name, suffix)
+    assert slicing.settings_for({"printer": pid, "quality": "fine"})["process"] == "0.16mm Optimal @BBL " + suffix
+
+
+def test_settings_default_printer_is_the_p1s_and_unknown_is_refused():
+    s = slicing.settings_for({})
+    assert s["printer_id"] == "p1s" and s["printer"] == "Bambu Lab P1S 0.4 nozzle"
+    assert slicing.settings_for({"printer": "p1s"}) == s
+    for bad in ("x1c", "A1", "a1 mini"):
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.settings_for({"printer": bad})
+        assert e.value.status == 400 and "unknown printer option" in str(e.value)
+
+
+@pytest.mark.parametrize("pid", ["a1", "a1m"])
+def test_incompatible_pair_is_refused_on_every_printer(pid):
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.settings_for({"printer": pid, "filament": "petg_hf", "plate": "cool"})
+    assert e.value.status == 400 and "choose another plate" in str(e.value)
+
+
+def test_prepare_uses_the_chosen_printers_bed():
+    big = stl_bytes(box_tris(200, 20, 20, 0, 0, 0))
+    out, info = slicing.prepare_stl(big)                          # fits the 256 mm bed
+    assert info["size_mm"][0] == 200
+    slicing.prepare_stl(big, "a1")
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.prepare_stl(big, "a1m")
+    assert e.value.status == 400 and "does not fit the 180 mm bed" in str(e.value)
+    n, (xs, ys, zs) = read_stl(slicing.prepare_stl(stl_bytes(box_tris(20, 20, 20, -10, -10, -5)), "a1m")[0])
+    assert (min(xs), max(xs), min(ys), max(ys), min(zs)) == pytest.approx((80, 100, 80, 100, 0))   # bed centre 90, 90
+    with pytest.raises(slicing.SliceError):
+        slicing.prepare_stl(big, "nope")
+
+
+def test_check_gcode_matches_the_printer_model():
+    for pid, suffix, model in (("a1", "A1", "Bambu Lab A1"), ("a1m", "A1M", "Bambu Lab A1 mini")):
+        s = slicing.settings_for({"printer": pid})
+        assert slicing.check_gcode(a1_gcode(model, suffix), s)["layers"] == 348
+        with pytest.raises(slicing.SliceError) as e:
+            slicing.check_gcode(gcode(), s)                       # a P1S file for an A1 request
+        assert "printer_model" in str(e.value)
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(a1_gcode(), slicing.settings_for({}))   # an A1 file for a P1S request
+    assert "printer_model" in str(e.value)
+    with pytest.raises(slicing.SliceError):
+        slicing.check_gcode(a1_gcode("Bambu Lab A1 mini", "A1"), slicing.settings_for({"printer": "a1"}))
+
+
+def test_a1_has_no_excluded_corner_but_the_p1s_has():
+    body = "G1 X5 Y5 E0.1\nG1 X6 Y5 E0.2"
+    assert slicing.check_gcode(a1_gcode(body=body), slicing.settings_for({"printer": "a1"}))["layers"] == 348
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(gcode(body=body), slicing.settings_for({}))
+    assert "excluded bed corner" in str(e.value)
+
+
+def test_check_gcode_bed_size_follows_the_printer():
+    body = "G1 X185 Y100 E0.1\nG1 X186 Y100 E0.2"
+    assert slicing.check_gcode(a1_gcode(body=body), slicing.settings_for({"printer": "a1"}))["layers"] == 348
+    with pytest.raises(slicing.SliceError) as e:
+        slicing.check_gcode(a1_gcode("Bambu Lab A1 mini", "A1M", body=body), slicing.settings_for({"printer": "a1m"}))
+    assert "outside the bed" in str(e.value)
+    for bad in ("G1 X257 Y100 E0.1", "G1 X100 Y-1 E0.1"):
+        with pytest.raises(slicing.SliceError):
+            slicing.check_gcode(a1_gcode(body=bad), slicing.settings_for({"printer": "a1"}))
+
+
+def test_labels_name_the_printer():
+    assert slicing._labels({})["printer"] == "Bambu P1S"
+    assert slicing._labels({"printer": "a1m"})["printer"] == "Bambu A1 mini"

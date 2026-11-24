@@ -1,4 +1,5 @@
-"""Slice for P1S core: turns a binary STL into a Bambu Lab P1S print file (.gcode.3mf) with the OrcaSlicer engine.
+"""Slice core: turns a binary STL into a Bambu Lab print file (.gcode.3mf: P1S, A1 or A1 mini, 0.4 mm nozzle) with the
+OrcaSlicer engine.
 
 The engine runs in a separate Node process (slicer/slice_job.js, installed by slicer/install.sh). Nothing here
 raises at import when Node, the engine or the profiles are missing: available() reports it.
@@ -18,13 +19,10 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLICER_DIR = os.path.join(HERE, "slicer")  # tests replace this
 MAX_TRIANGLES = 150_000
-BED_MM = 256
-PRINTER = "Bambu Lab P1S 0.4 nozzle"
 TIMEOUT_S = 900
 GCODE_ENTRY = "Metadata/plate_1.gcode"
 OUTPUT_NAME = "model.gcode.3mf"
 ENGINE_TAIL = 300
-EXCLUDED_CORNER = (18.0, 28.0)   # P1S bed_exclude_area: front-left, x 0-18 mm by y 0-28 mm
 BED_TEMP_KEYS = {"Cool Plate": "cool_plate_temp", "Textured PEI Plate": "textured_plate_temp",
                  "High Temp Plate": "hot_plate_temp"}
 log = logging.getLogger("image3d.slicing")
@@ -40,6 +38,30 @@ class SliceError(ValueError):
 
 def _row(id_, label, profile):
     return {"id": id_, "label": label, "profile": profile}
+
+
+# The printers the page offers; the first is the default. bed_mm and corner come from Bambu's machine profiles
+# (printable_area, bed_exclude_area; corner = (x, y) size of the blocked front-left area, None for no such area).
+# filament_tag / quality_tag: the part of Bambu's filament / process profile names that differs per printer (the
+# OPTIONS rows below hold the P1S names; checked against the real profiles with the real engine for all three).
+PRINTERS = [
+    {"id": "p1s", "label": "Bambu P1S", "model": "Bambu Lab P1S", "machine": "Bambu Lab P1S 0.4 nozzle",
+     "bed_mm": 256, "corner": (18.0, 28.0), "filament_tag": "P1S 0.4 nozzle", "quality_tag": "X1C"},
+    {"id": "a1", "label": "Bambu A1", "model": "Bambu Lab A1", "machine": "Bambu Lab A1 0.4 nozzle",
+     "bed_mm": 256, "corner": None, "filament_tag": "A1", "quality_tag": "A1"},
+    {"id": "a1m", "label": "Bambu A1 mini", "model": "Bambu Lab A1 mini", "machine": "Bambu Lab A1 mini 0.4 nozzle",
+     "bed_mm": 180, "corner": None, "filament_tag": "A1M", "quality_tag": "A1M"},
+]
+P1S_FILAMENT_TAG, P1S_QUALITY_TAG = "P1S 0.4 nozzle", "X1C"
+
+
+def printer_for(printer_id=None):
+    """The PRINTERS row for an id (None = the default). Raises SliceError(400) for an unknown id."""
+    want = printer_id or PRINTERS[0]["id"]
+    row = next((p for p in PRINTERS if p["id"] == want), None)
+    if row is None:
+        raise SliceError(400, "unknown printer option: %s" % want)
+    return row
 
 
 # First entry of each list is the default.
@@ -65,7 +87,7 @@ OPTIONS = {
         _row("tree", "Tree (auto)", "tree(auto)"),
     ],
 }
-# (filament id, plate id) pairs Bambu's profile does not support: the engine slices them anyway, with a bed that never
+# (filament id, plate id) pairs Bambu's profile does not support (the same on all three printers): the engine slices them anyway, with a bed that never
 # heats (cool_plate_temp = 0). Checked against the real profiles: every other pair has a bed temperature above 0.
 INCOMPATIBLE = {("petg_hf", "cool")}
 # Engine option values must be strings: a numeric 1 is silently ignored.
@@ -116,10 +138,12 @@ def available():
 _CHUNK = 2000   # records per struct call: a few hundred KB of temporary floats, not one Python object per vertex
 
 
-def prepare_stl(data):
-    """Checks a binary STL and moves it to the middle of the bed (XY centre 128, 128) with its lowest point at z = 0
+def prepare_stl(data, printer=None):
+    """Checks a binary STL and moves it to the middle of the bed of the chosen printer (id, default P1S; XY centre
+    128, 128 on the 256 mm beds) with its lowest point at z = 0
     (the engine does not centre the model itself). Returns (stl bytes, {"triangles", "size_mm"}).
     Memory-lean: two passes over the records in chunks, the translated copy is built in one bytearray."""
+    bed = printer_for(printer)["bed_mm"]
     if len(data) < 84:
         raise SliceError(400, "not a binary STL file")
     n = struct.unpack_from("<I", data, 80)[0]
@@ -146,9 +170,9 @@ def prepare_stl(data):
             lo[a] = min(lo[a], min(col))
             hi[a] = max(hi[a], max(col))
     size = [hi[a] - lo[a] for a in range(3)]
-    if max(size) > BED_MM:
-        raise SliceError(400, "model is %.0f x %.0f x %.0f mm and does not fit the %d mm bed" % (*size, BED_MM))
-    shift = (BED_MM / 2 - (lo[0] + hi[0]) / 2, BED_MM / 2 - (lo[1] + hi[1]) / 2, -lo[2])
+    if max(size) > bed:
+        raise SliceError(400, "model is %.0f x %.0f x %.0f mm and does not fit the %d mm bed" % (*size, bed))
+    shift = (bed / 2 - (lo[0] + hi[0]) / 2, bed / 2 - (lo[1] + hi[1]) / 2, -lo[2])
     out = bytearray(84 + 50 * n)
     out[:84] = view[:84]
     for first, count, st in chunks:
@@ -164,7 +188,8 @@ def prepare_stl(data):
 
 # ---------- settings ----------
 def settings_for(choice):
-    """Option ids ({"filament","quality","plate","supports"}, missing = default) -> what the engine is given."""
+    """Option ids ({"printer","filament","quality","plate","supports"}, missing = default) -> what the engine is given."""
+    printer = printer_for((choice or {}).get("printer"))
     picked = {}
     for key, rows in OPTIONS.items():
         want = (choice or {}).get(key) or rows[0]["id"]
@@ -177,12 +202,14 @@ def settings_for(choice):
                          % (picked["filament"]["label"], picked["plate"]["label"]))
     options = {"curr_bed_type": picked["plate"]["profile"]}
     options.update(SUPPORT_OPTIONS[picked["supports"]["id"]])
-    return {"printer": PRINTER, "filament": picked["filament"]["profile"], "process": picked["quality"]["profile"],
+    filament = picked["filament"]["profile"].replace("@BBL " + P1S_FILAMENT_TAG, "@BBL " + printer["filament_tag"])
+    process = picked["quality"]["profile"].replace("@BBL " + P1S_QUALITY_TAG, "@BBL " + printer["quality_tag"])
+    return {"printer": printer["machine"], "printer_id": printer["id"], "filament": filament, "process": process,
             "options": options}
 
 
 def _labels(choice):
-    out = {}
+    out = {"printer": printer_for((choice or {}).get("printer"))["label"]}
     for key, rows in OPTIONS.items():
         want = (choice or {}).get(key) or rows[0]["id"]
         out[key] = next(r["label"] for r in rows if r["id"] == want)
@@ -249,7 +276,7 @@ def _arc_extremes(x, y, nx, ny, cx, cy, ccw):
     return out
 
 
-def _check_moves(lines):
+def _check_moves(lines, printer):
     """Walks the whole G-code keeping the X/Y position, G90/G91, the extruder mode and the extruder position. From the
     first '; FEATURE:' line on, every extruding move must stay inside the bed: the start and end of a line, and for
     an arc the part of the circle it sweeps (the start sequence before that legitimately parks and purges near the
@@ -354,10 +381,11 @@ def _check_moves(lines):
                     bad("arc cannot be bounded", n)
                 points += _arc_extremes(x, y, nx, ny, x + w.get("I", 0.0), y + w.get("J", 0.0), code == 3)
             for px, py in points:
-                if not (0 <= px <= BED_MM and 0 <= py <= BED_MM):
+                if not (0 <= px <= printer["bed_mm"] and 0 <= py <= printer["bed_mm"]):
                     bad("extruding move outside the bed (X%.1f Y%.1f)" % (px, py), n)
                 # the engine's own purge line (feature Custom) runs through this corner; nothing else may
-                if feature != "Custom" and px < EXCLUDED_CORNER[0] and py < EXCLUDED_CORNER[1]:
+                corner = printer["corner"]
+                if corner and feature != "Custom" and px < corner[0] and py < corner[1]:
                     bad("extruding move in the excluded bed corner (X%.1f Y%.1f)" % (px, py), n)
         x, y = nx, ny
     if not printing:
@@ -378,8 +406,9 @@ def check_gcode(gcode, settings):
     def fail(key, got, want):
         raise SliceError(500, "slice check failed: %s is '%s', expected '%s'" % (key, got[:80], want))
 
-    if need("printer_model") != "Bambu Lab P1S":
-        fail("printer_model", cfg["printer_model"], "Bambu Lab P1S")
+    printer = printer_for(settings.get("printer_id"))
+    if need("printer_model") != printer["model"]:
+        fail("printer_model", cfg["printer_model"], printer["model"])
     if not need("nozzle_diameter").startswith("0.4"):
         fail("nozzle_diameter", cfg["nozzle_diameter"], "0.4")
     if need("filament_settings_id") != settings["filament"]:
@@ -401,7 +430,7 @@ def check_gcode(gcode, settings):
         if not hot:
             raise SliceError(500, "slice check failed: bed temperature is 0 for this plate (%s = %s)" % (key, raw[:20]))
 
-    _check_moves(lines)
+    _check_moves(lines, printer)
 
     time_m = re.search(r"^; model printing time: [^;\n]*; total estimated time: ([^\n]+)$", gcode, re.M)
     grams_m = re.search(r"^; filament used \[g\] = (-?\d+\.?\d*)", gcode, re.M)

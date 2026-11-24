@@ -288,7 +288,7 @@ def root():
     return FileResponse(os.path.join(HERE, "image3d.html"), media_type="text/html")
 
 
-# ---------- Slice for P1S: one background job at a time ----------
+# ---------- Slice for a Bambu printer (P1S, A1, A1 mini): one background job at a time ----------
 SLICER = slicing.run_slice  # tests replace this: (prepared stl bytes, choice dict, workdir, prepared=info) -> (path, summary)
 SLICER_AVAILABLE = slicing.available  # tests replace this
 JOB_KEEP_S = 1800  # a finished job (and its file) stays this long (less if the free server sleeps or restarts)
@@ -349,7 +349,9 @@ def _run_job(job, choice, info):
 def slice_options():
     options = {key: [{"id": r["id"], "label": r["label"]} for r in rows] for key, rows in slicing.OPTIONS.items()}
     return {"available": bool(SLICER_AVAILABLE()), "limits": {"max_triangles": slicing.MAX_TRIANGLES},
-            "options": options, "incompatible": [list(pair) for pair in sorted(slicing.INCOMPATIBLE)]}
+            "options": options, "incompatible": [list(pair) for pair in sorted(slicing.INCOMPATIBLE)],
+            "printers": [{"id": p["id"], "label": p["label"], "bed_mm": p["bed_mm"]} for p in slicing.PRINTERS],
+            "default_printer": slicing.PRINTERS[0]["id"]}
 
 
 def _running():
@@ -359,7 +361,7 @@ def _running():
 
 @app.post("/api/slice")
 async def slice_start(model: UploadFile = File(...), filament: str = Form(None), quality: str = Form(None),
-                      plate: str = Form(None), supports: str = Form(None)):
+                      plate: str = Form(None), supports: str = Form(None), printer: str = Form(None)):
     global _worker
     # configuration, passcode and body size are already enforced by GenerateGuard
     if not SLICER_AVAILABLE():
@@ -371,11 +373,11 @@ async def slice_start(model: UploadFile = File(...), filament: str = Form(None),
     data = await model.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         return _fail(413, "model is too large (10 MB limit)")
-    choice = {k: v for k, v in (("filament", filament), ("quality", quality), ("plate", plate),
-                                ("supports", supports)) if v}
+    choice = {k: v for k, v in (("printer", printer), ("filament", filament), ("quality", quality),
+                                ("plate", plate), ("supports", supports)) if v}
     try:  # validated once here; the job gets the prepared bytes and does not parse them again
         slicing.settings_for(choice)
-        prepared, info = await run_in_threadpool(slicing.prepare_stl, data)
+        prepared, info = await run_in_threadpool(slicing.prepare_stl, data, choice.get("printer"))
     except slicing.SliceError as e:
         return _fail(e.status, str(e)[:MAX_DETAIL])
     del data
