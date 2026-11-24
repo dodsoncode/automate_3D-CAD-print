@@ -18,14 +18,14 @@ Status: the Hugging Face call was run for real on 2026-11-11 from Claude's works
 
 ## C. Use it
 1. Open the service URL shown at the top of the Render page (`https://image3d-....onrender.com`).
-2. The Generate from a photo box shows up when the server is awake. Choose a photo, type the passcode (the page remembers it on this phone), tap Generate.
+2. The Passcode box and the Generate from a photo box (step 1) show up when the server is awake. Type the passcode at the top (the page remembers it on this phone), choose a photo, tap Generate.
 3. Wait a minute or two. The model opens in the editor; then delete pieces, resize, cut and export the STL as usual.
 
 ## Updating to get the slicer
 The "Slice for P1S" section comes with a new build step (`bash slicer/install.sh`, added to the build command in `render.yaml`). To get it after the PR is merged:
 1. The build command lives in `render.yaml`, and Render only applies it when the **Blueprint syncs**. On 2026-11-13 the service redeployed with the OLD build command (the build log said `Running build command 'pip install -r requirements.txt'`, with no `SLICER INSTALL` line) until the Blueprint was synced by hand. If that happens: in the Render dashboard open **Blueprints**, open `image3d`, tap **Manual sync**. The sync lists "Update web service image3d build command to `pip install -r requirements.txt && bash slicer/install.sh`" and starts a deploy. If no deploy starts, open the service and tap Manual Deploy, then Deploy latest commit.
 2. When the deploy is Live, open the Logs tab and look in the build log for the line `SLICER INSTALL: ok`.
-3. In the phone browser open `<service URL>/api/slice/options`. It should show `"available": true`. Then reload the page: the Slice for P1S section appears below Export.
+3. In the phone browser open `<service URL>/api/slice/options`. It should show `"available": true`. Then reload the page: the Slice for P1S section appears in step 3 (Slice).
    The install step ends by slicing a built-in 10 mm cube; only if that works does it write `slicer/.install_ok`, and the page offers slicing only when that file is present for the pinned OrcaSlicer commit. The engine library needs glibc 2.35 or newer, libstdc++ with GLIBCXX_3.4.30, libcrypto.so.3, libfontconfig.so.1, libexpat and libz. If Render's build image lacks one of these, the build log shows `SLICER INSTALL: failed at smoke` (with the last lines of the engine output above it), the page says "Slicer unavailable on this server", and everything else keeps working.
 4. If it shows `"available": false` (or the build log says `SLICER INSTALL: failed at ...`), the rest of the app still works: the install step cannot fail the deploy. Send Claude the build-log lines around `SLICER INSTALL`.
 5. Expect a slice to take about 3 minutes on the free instance (an estimate from CPU-seconds measured elsewhere, not measured on Render). Models are limited to 150,000 triangles, but that limit does not by itself keep the slicer inside the free instance's memory.

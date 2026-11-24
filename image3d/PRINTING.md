@@ -11,7 +11,7 @@ The first choice in each list is the default.
 
 ## Steps
 1. In the editor, get the model the way you want it, then open Slice for P1S and choose the four settings.
-2. Type the passcode in the Generate box at the top of the page first (the Slice section has no passcode field; with the box empty the page says "Enter the passcode in the Generate section first"). Then tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.
+2. Type the passcode in the Passcode box at the very top of the page first (the steps below have no passcode field; with the box empty the page says "Enter the passcode at the top first"). Then tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.
 3. Get the file onto the printer with route A or B below.
 4. On the printer's screen open the file (Files / SD card) and start it.
 

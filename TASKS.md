@@ -112,6 +112,9 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] SL7 (J) Try Mirror on the phone with a generated model
 - [x] SL8 (C) "Send to printer from this phone": copy a-Shell command + "Send to P1S" Shortcut link - desktop-tested 2026-11-14
 - [ ] SL9 (J) Try "Copy a-Shell command" on the phone, then set up the Shortcut and try "Send with Shortcut" (`image3d/PRINTING.md`)
+- [x] SL10 (C) Page flow: passcode at top, numbered steps 1-4, "Upload GLB file" button (design `docs/superpowers/specs/2026-11-23-page-flow-and-a1-design.md`) - desktop-tested 2026-11-23
+- [ ] SL12 (J) Look at the new page flow on the phone (after merge and redeploy); say what is still awkward
+- [ ] SL11 (C) Printer dropdown: P1S, A1, A1 mini (after SL10 is seen on the phone)
 
 ### Parked (Jacob, 2026-11-13)
 - Brim option on the slice panel (small parts came loose on the first print)
