@@ -1,6 +1,6 @@
-# Printing from the Slice for P1S file
+# Printing from the sliced file (Bambu P1S or A1)
 
-The page makes `model.gcode.3mf` for the Bambu P1S with a 0.4 mm nozzle. This is how to choose the settings and get the file onto the printer from your phone.
+The page makes `model.gcode.3mf` for the Bambu P1S or the Bambu A1 with a 0.4 mm nozzle (pick the **Printer** at the top of step 3; the page remembers it). This is how to choose the settings and get the file onto the printer from your phone.
 
 ## The settings
 The first choice in each list is the default.
@@ -10,7 +10,7 @@ The first choice in each list is the default.
 - **Supports:** Off (default) or Tree (auto), which adds tree supports where the model needs them.
 
 ## Steps
-1. In the editor, get the model the way you want it, then open Slice for P1S and choose the four settings.
+1. In the editor, get the model the way you want it, then in step 3 choose the Printer and the four settings.
 2. Type the passcode in the Passcode box at the very top of the page first (the steps below have no passcode field; with the box empty the page says "Enter the passcode at the top first"). Then tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.
 3. Get the file onto the printer with route A or B below.
 4. On the printer's screen open the file (Files / SD card) and start it.
@@ -26,10 +26,11 @@ The printer stays in normal cloud mode. Nothing here needs LAN-only mode or Deve
 **Easiest: "Send to printer from this phone" on the page (added 2026-11-14, not yet tried on the phone)**
 After a slice finishes, open "Send to printer from this phone" under Download print file. Enter the printer's IP address and access code (both on the printer's WLAN screen) and a name for the file on the printer. They are saved on this phone only and never sent to the server.
 - **Copy a-Shell command:** copies one line that fetches the slice from the site and uploads it to the printer. Open a-Shell, paste, press return. A progress line reaching 100% and no `curl:` error means it is on the printer. No download, no `pickFolder`.
-- **Send with Shortcut:** one tap, once the "Send to P1S" Shortcut below is set up.
+- **Send with Shortcut:** one tap, once the Shortcut for that printer ("Send to P1S" or "Send to A1") is set up.
+- Each printer keeps its own IP address, access code and file name on the phone, so choose the printer first.
 - The slice has to still be on the server: up to 30 minutes, less if the free server went to sleep. If you get `curl: (22) ... 404`, slice again.
 
-**Setting up the "Send to P1S" Shortcut (once, about 10 minutes)**
+**Setting up the "Send to P1S" Shortcut (once per printer, about 10 minutes; for the A1 name it `Send to A1` and use the setup text copied while A1 is the chosen printer)**
 1. On the page, fill in the printer details and tap **Copy Shortcut setup text**. It contains your access code: paste it only into the Shortcut.
 2. Open the Shortcuts app, tap **+**, and name the shortcut exactly `Send to P1S`.
 3. Add **Match Text**. Pattern: `^[A-Za-z0-9_-]{1,40}:[A-Za-z0-9_-]{6,32}$`. Text: **Shortcut Input**.
@@ -78,9 +79,9 @@ The file's start sequence loads filament from **AMS slot 1** only when the print
 
 ## What is checked, and what is not
 Before the file is offered, the server checks it automatically:
-- the printer model is the P1S and the nozzle is 0.4;
+- the printer model is the one you chose (P1S or A1) and the nozzle is 0.4;
 - the filament, quality, plate and supports in the file match your choices;
-- every extruding move stays inside the 256 mm bed and out of the front-left corner the P1S does not print in (the printer's own start-up purge line is the one exception);
+- every extruding move stays inside the 256 mm bed and, on the P1S, out of the front-left corner it does not print in (the printer's own start-up purge line is the one exception; the A1 has no such corner);
 - the bed temperature for the chosen plate is above zero in the settings stored in the file, and a bed-heat command comes before printing starts.
 
 If a check fails, no file is offered and the page says why.

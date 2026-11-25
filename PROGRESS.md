@@ -454,3 +454,19 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT verified: a real phone (iOS Safari); a real generated model through the new layout. Not yet tried: whether the greyed steps feel clear in use.
 - NEXT: PR to `main`; Jacob says when to merge and looks at it on the phone (SL12). Then PR 2: Printer dropdown (P1S, A1, A1 mini; SL11).
 - BLOCKED: nothing.
+
+### 2026-11-24 - PR #14 merged; A1 support, step 1 of 3: slicing core and server
+- DONE: PR #14 (page flow) merged to `main` (c73d0b1) at Jacob's request. Branch `printer-dropdown`.
+- DONE: `image3d/slicing.py` has a `PRINTERS` table (P1S default, A1, A1 mini; 0.4 mm nozzle): machine profile, printer model string, bed (256 / 256 / 180 mm), the P1S-only blocked front-left corner, and the per-printer part of Bambu's filament and quality profile names. `settings_for`, `prepare_stl` (model centred on that bed, size limit = that bed) and `check_gcode` (printer model, bed bounds, corner) all follow the chosen printer. `server.py`: `/api/slice` takes a `printer` form field (unknown is a 400 before queueing); `/api/slice/options` lists `printers` and `default_printer`. The result summary names the printer.
+- Real-engine facts (script-checked 2026-11-24 with the installed OrcaSlicer on a small cube, all 4 filaments x 3 plates on A1 and A1 mini): printer_model, nozzle and bed area are as the table says; no bed exclusion area on either; the only plate/filament pair with a 0 bed temperature is PETG HF on the Cool Plate, the same pair as on the P1S (so `INCOMPATIBLE` is shared).
+- Tests: 13 new slicing tests and 4 new server tests written first; `test_slicing.py` 194 passed, `test_server.py` passed. Not yet run: the full suite, the page.
+- NEXT: page (Printer dropdown, per-printer saved IP/code, title and send box naming the printer), docs, PR.
+- BLOCKED: nothing. NOT verified on a real A1 (no A1 print yet).
+
+### 2026-11-24 - A1 support (PR 2 of 2): Printer dropdown with P1S and A1
+- DONE: page: a **Printer** dropdown first in step 3 (P1S default, A1), remembered on the phone. It sets the slice title and subtitle, the bed size (3D grid and the "Fits N mm bed" chip), the saved send details (IP, access code, file name kept per printer; the P1S keeps the key the page always used) and the Shortcut name (`Send to P1S` / `Send to A1`, so each printer can have its own Shortcut with its own address and code). The printer is sent as the `printer` form field. `PRINTING.md`, `README.md`, `image3d/PROGRESS.md` (Step 26) and the design doc updated; TASKS SL11 done, SL13 added.
+- DECISION: the **A1 mini is not offered**. Real-engine check 2026-11-24: Bambu's pinned A1 mini profile reuses the A1 start sequence, which draws its purge line out to Y=200 mm on a 180 mm bed; our move check refuses the file ("extruding move outside the bed (X10.1 Y200.0)"). Shipping it would mean trusting a start sequence nobody has verified on a mini. Parked in TASKS. A real-engine test (`test_a1_mini_start_sequence_is_refused`) records why.
+- Tests (written first): slicing 13 new (table, profile names, bed/corner/model checks, labels, real-engine A1 slice with supports and every filament x plate), server 4 new, page 8 new; `python -m pytest -q image3d/tests gui/tests`: 407 passed. Real-engine facts (script-checked): A1 has no excluded corner, bed 256, one unsupported pair (PETG HF on Cool Plate), same as the P1S.
+- NOT verified: anything on a real A1 (no A1 print yet; its start sequence, AMS-lite behaviour and the files starting on it); the page on a real phone. The A1 filament/process profile names were checked by the real engine, not by a print.
+- NEXT: Jacob merges when ready, looks at it on the phone, then SL13 (first A1 slice, send, print). Open from before: SL5, SL7, SL9, SL12.
+- BLOCKED: nothing.

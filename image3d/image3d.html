@@ -125,10 +125,11 @@
       <h2><span class="num">3</span><span id="step3-name">Export</span></h2>
       <div class="step-lock small">Load a model first.</div>
     <div id="slice-panel" hidden>
-      <strong>Slice for P1S</strong>
+      <strong id="slice-title">Slice for P1S</strong>
       <div id="slice-unavailable" hidden>Slicer unavailable on this server</div>
       <div id="slice-form" hidden>
-        <div class="small">Bambu P1S, 0.4 mm nozzle</div>
+        <div class="small" id="slice-sub">Bambu P1S, 0.4 mm nozzle</div>
+        <label for="slice-printer">Printer</label><select id="slice-printer"></select>
         <label for="slice-filament">Filament</label><select id="slice-filament"></select>
         <label for="slice-quality">Quality</label><select id="slice-quality"></select>
         <label for="slice-plate">Plate</label><select id="slice-plate"></select>
@@ -1890,12 +1891,19 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   var state = { model: [], selected: -1 };
   var undoStack = [], BED = 256, LIST_MAX = 30;
   var App = { state: state, serverMode: false };
+  Object.defineProperty(App, 'bed', { get: function () { return BED; } });
 
   // ---------- messages ----------
   function msg(text, isErr) { var m = $('msg'); m.textContent = text || ''; m.className = isErr ? 'err' : ''; }
 
   // ---------- 3D view ----------
-  var cutActive = false, renderer, scene, camera, controls, group, planeMesh, bedMesh, glOk = false, needsFit = true;
+  var cutActive = false, renderer, scene, camera, controls, group, planeMesh, gridObj, glOk = false, needsFit = true;
+  function makeGrid() {
+    if (!scene) return;
+    if (gridObj) { scene.remove(gridObj); if (gridObj.geometry) gridObj.geometry.dispose(); }
+    gridObj = new THREE.GridHelper(BED, 8, 0x8ea0b8, 0xb7c4d6); gridObj.rotation.x = Math.PI / 2; scene.add(gridObj);
+  }
+  function setBed(mm) { if (mm === BED) return; BED = mm; makeGrid(); refreshChecks(); needsFit = true; }
   function initView() {
     var host = $('view');
     try {
@@ -1912,7 +1920,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.9));
     var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(200, -150, 400); scene.add(sun);
     group = new THREE.Group(); scene.add(group);
-    var grid = new THREE.GridHelper(BED, 8, 0x8ea0b8, 0xb7c4d6); grid.rotation.x = Math.PI / 2; scene.add(grid);
+    makeGrid();
     var pm = new THREE.MeshBasicMaterial({ color: 0x1f6feb, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
     planeMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), pm); planeMesh.visible = false; scene.add(planeMesh);
     controls.addEventListener('change', render);
@@ -2005,7 +2013,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (!n) { setChk('chk-closed', 'no model', ''); setChk('chk-bed', 'bed', ''); setChk('chk-count', '0 pieces', ''); return; }
     var closed = state.model.every(M.isClosed), s = M.bbox(state.model).size, fits = Math.max(s[0], s[1], s[2]) <= BED;
     setChk('chk-closed', closed ? 'Watertight' : 'Not closed (may still print)', closed ? 'ok' : 'warn');
-    setChk('chk-bed', fits ? 'Fits 256 mm bed' : 'Too big for 256 mm bed', fits ? 'ok' : 'bad');
+    setChk('chk-bed', fits ? 'Fits ' + BED + ' mm bed' : 'Too big for ' + BED + ' mm bed', fits ? 'ok' : 'bad');
     setChk('chk-count', n + (n === 1 ? ' piece' : ' pieces'), n === 1 ? 'ok' : 'warn');
   }
   function resetCutRange() {
@@ -2251,6 +2259,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     else if (!state.model.every(M.isClosed)) hint = 'Model is not closed - slicing may fail';
     $('btn-slice').disabled = off; $('slice-hint').textContent = hint;
     SLICE_SELECTS.forEach(function (k) { $('slice-' + k).disabled = slicing; });
+    $('slice-printer').disabled = slicing;
     updateFloatWarning();
   }
   // supports off and a piece that starts more than 0.3 mm above the lowest point of the model: it would print in mid-air
@@ -2353,6 +2362,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     slicing = true; sliceStale = false; updateWake(); updateSliceControls(); hideSliceResult(); msg(''); sliceStatus('Sending the model...');
     var fd = new FormData();
     fd.append('model', new Blob([exportStl()], { type: 'model/stl' }), 'model.stl');
+    fd.append('printer', $('slice-printer').value);
     SLICE_SELECTS.forEach(function (k) { fd.append(k, $('slice-' + k).value); });
     fetch('api/slice', { method: 'POST', headers: passHeaders(), body: fd })
       .then(function (r) {
@@ -2384,7 +2394,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   // command fetches the slice from this site (with the site passcode) and uploads it to the printer by FTPS in one curl
   // call (--next; --fail-early stops before the upload if the fetch fails). The Shortcut link carries only name:job, so
   // a web page cannot make the Shortcut run a command of its own.
-  var SEND_KEY = 'image3d.printer', SHORTCUT = 'Send to P1S';
+  // Details are kept per printer: the P1S keeps the key the page always used, the others add their id.
+  var SEND_KEY = 'image3d.printer', PRINTER_KEY = 'image3d.slicePrinter', slicePrinters = [], curPrinter = { id: 'p1s', label: 'Bambu P1S', bed_mm: 256 };
+  function shortName() { return curPrinter.label.replace(/^Bambu /, ''); }
+  function shortcutName() { return 'Send to ' + shortName(); }
+  function sendKey() { return curPrinter.id === 'p1s' ? SEND_KEY : SEND_KEY + '.' + curPrinter.id; }
   function sendMsg(t, err) { $('send-msg').textContent = t; $('send-msg').className = 'small' + (err ? ' err' : ''); }
   function cleanName(n) {
     n = String(n || '').trim().replace(/\.gcode\.3mf$/i, '').replace(/\.3mf$/i, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -2392,7 +2406,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function sendName() { var n = cleanName($('send-name').value); $('send-name').value = n; return n || 'model'; }
   function saveSend() {
-    try { localStorage.setItem(SEND_KEY, JSON.stringify({ ip: $('send-ip').value.trim(), code: $('send-code').value.trim(), name: $('send-name').value })); } catch (e) { /* storage blocked */ }
+    try { localStorage.setItem(sendKey(), JSON.stringify({ ip: $('send-ip').value.trim(), code: $('send-code').value.trim(), name: $('send-name').value })); } catch (e) { /* storage blocked */ }
   }
   function goodIp(ip) {
     var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
@@ -2415,7 +2429,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function updateShortcutLink() {
     var job = sliceDoneJob || '';
-    $('btn-send-shortcut').href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT) + '&input=text&text=' + encodeURIComponent(cleanName($('send-name').value) || 'model') + '%3A' + encodeURIComponent(job);
+    $('btn-send-shortcut').href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(shortcutName()) + '&input=text&text=' + encodeURIComponent(cleanName($('send-name').value) || 'model') + '%3A' + encodeURIComponent(job);
   }
   function copyText(text, okText) {
     $('send-fallback').hidden = true;
@@ -2425,10 +2439,25 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     };
     try { navigator.clipboard.writeText(text).then(done, fail); } catch (e) { fail(); }
   }
-  try {
-    var sv = JSON.parse(localStorage.getItem(SEND_KEY) || 'null');
-    if (sv) { $('send-ip').value = sv.ip || ''; $('send-code').value = sv.code || ''; $('send-name').value = sv.name || ''; }
-  } catch (e) { /* storage blocked or bad data */ }
+  function loadSend() {
+    var sv = null;
+    try { sv = JSON.parse(localStorage.getItem(sendKey()) || 'null'); } catch (e) { /* storage blocked or bad data */ }
+    $('send-ip').value = (sv && sv.ip) || ''; $('send-code').value = (sv && sv.code) || ''; $('send-name').value = (sv && sv.name) || '';
+    updateShortcutLink();
+  }
+  loadSend();
+  // the chosen printer: title, bed size and the saved send details follow it
+  function applyPrinter() {
+    var id = $('slice-printer').value;
+    curPrinter = slicePrinters.filter(function (p) { return p.id === id; })[0] || curPrinter;
+    $('slice-title').textContent = 'Slice for ' + shortName();
+    $('slice-sub').textContent = curPrinter.label + ', 0.4 mm nozzle';
+    setBed(curPrinter.bed_mm); loadSend();
+  }
+  $('slice-printer').addEventListener('change', function () {
+    hideSliceResult(); applyPrinter();
+    try { localStorage.setItem(PRINTER_KEY, curPrinter.id); } catch (e) { /* storage blocked */ }
+  });
   ['send-ip', 'send-code', 'send-name'].forEach(function (id) {
     $(id).addEventListener('input', function () { saveSend(); updateShortcutLink(); });
   });
@@ -2447,7 +2476,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('btn-send-template').addEventListener('click', function () {
     var p = sendParts();
     if (p.err) { $('send-fallback').hidden = true; sendMsg(p.err, true); return; }
-    copyText(uploadCommand(p, '$1', '$2'), 'Copied the setup text for the "' + SHORTCUT + '" Shortcut (it contains your access code). Paste it into the Shortcut\'s Replace Text action; see PRINTING.md.');
+    copyText(uploadCommand(p, '$1', '$2'), 'Copied the setup text for the "' + shortcutName() + '" Shortcut (it contains your access code). Paste it into the Shortcut\'s Replace Text action; see PRINTING.md.');
   });
 
   // a person changing a setting makes the shown result (and its Download) stale; filling the lists in code does not
@@ -2469,6 +2498,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         var sel = $('slice-' + k); sel.textContent = '';
         (sliceOpts[k] || []).forEach(function (o) { var e = document.createElement('option'); e.value = o.id; e.textContent = o.label; sel.appendChild(e); });
       });
+      slicePrinters = Array.isArray(j.printers) && j.printers.length ? j.printers : [curPrinter];
+      var ps = $('slice-printer'); ps.textContent = '';
+      slicePrinters.forEach(function (p) { var e = document.createElement('option'); e.value = p.id; e.textContent = p.label; ps.appendChild(e); });
+      var want = j.default_printer; try { want = localStorage.getItem(PRINTER_KEY) || want; } catch (e) { /* storage blocked */ }
+      if (slicePrinters.some(function (p) { return p.id === want; })) ps.value = want;
+      applyPrinter();
       updatePlates(); sliceStatus('');
       $('slice-form').hidden = false; $('step3-name').textContent = 'Slice'; $('step-4').hidden = false; sliceReady = true; updateSliceControls();
       var id = savedJob();

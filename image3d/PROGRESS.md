@@ -174,8 +174,12 @@ second **free Render** service next to the mental fitness app.
 ### Step 25 - Page flow: passcode at the top, steps 1-4 (2026-11-23)
 - Passcode box moved to the top (one box for Generate, Slice and Send). Numbered steps: 1 Get a model (Generate from photo, plus an "Upload GLB file" button that opens the file picker), 2 Edit, 3 Slice (with Export STL), 4 Send (download, a-Shell command, Shortcut). Steps 2-3 are greyed with "Load a model first" until a model is open; step 4 says "Slice a model first" until a slice exists. Without a server (the Claude artifact) there is no passcode, Slice or Send and step 3 reads "Export". Hugging Face how-to links removed. Details in the root `PROGRESS.md`.
 
+### Step 26 - Printer choice: P1S and A1 (2026-11-24)
+- `slicing.PRINTERS` table; a Printer dropdown first in step 3 (remembered on the phone); the bed size, grid, bed check chip, slice title, the printer's saved IP/access code/file name and the Shortcut name ("Send to P1S" / "Send to A1") follow it. The A1 mini was tried with the real engine and is NOT offered (start sequence purges to Y=200 on a 180 mm bed; our check refuses it). Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
 
+1. **SL13 - first A1 slice:** pick Printer = Bambu A1 in step 3, slice, send to the A1 (own IP and access code), start it on the A1; say what happened.
 1. **SL9 - try the send box:** after the next merge and redeploy, slice, open "Send to printer from this phone", fill it in, tap Copy a-Shell command, paste into a-Shell. Then set up the Shortcut ([`PRINTING.md`](PRINTING.md)) and try Send with Shortcut.
 1. **SL5 - a clean first print:** wash the plate, load filament from the printer's screen first, print one small piece, watch it ([`PRINTING.md`](PRINTING.md)).
 2. **SL7 - try Mirror on the phone** with a generated model, after the Mirror PR is merged and Render has redeployed.
