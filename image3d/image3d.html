@@ -52,7 +52,7 @@
   #step-1 > .row { margin-top: 10px; }
   #send-wait { margin-bottom: 6px; }
   #slice-result:not([hidden]) + #send-wait { display: none; }
-  #gen-panel[hidden], #slice-panel[hidden], #slice-form[hidden], #slice-unavailable[hidden], #slice-result[hidden] { display: none; }
+  #gen-panel[hidden], #gen-offline[hidden], #slice-panel[hidden], #slice-form[hidden], #slice-unavailable[hidden], #slice-result[hidden] { display: none; }
   .small { font-size: 13px; color: #566478; }
   #slice-panel label { display: block; font-size: 13px; color: #566478; margin: 8px 0 2px; }
   #slice-hint, #slice-status, #slice-float { margin-top: 6px; }
@@ -90,6 +90,7 @@
       <div class="row"><button id="btn-generate" class="primary">Generate</button></div>
       <div id="gen-status"></div>
     </div>
+      <div id="gen-offline" class="small" hidden>Generate from a photo works on the hosted site, not in this copy. Here you can open and edit a file you already have.</div>
       <div class="row"><button id="btn-upload" title="Open a GLB, OBJ or STL file you already have">Upload GLB file</button></div>
       <input type="file" id="file" accept=".glb,.obj,.stl" aria-label="Open a model file" hidden>
     </section>
@@ -2163,16 +2164,45 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   try { var p = localStorage.getItem('image3d.pass'); if (p) $('gen-pass').value = p; } catch (e) { /* storage blocked */ }
   $('gen-pass').addEventListener('input', function () { try { localStorage.setItem('image3d.pass', this.value); } catch (e) { /* storage blocked */ } });
 
-  // server mode: only when the Render app answers /api/health
-  function checkServer() {
-    if (!/^https?:$/.test(location.protocol) || typeof fetch !== 'function') return Promise.resolve();
-    var ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 3000) : null;
+  // Server mode: when the Render app answers /api/health. The free Render plan sleeps after a quiet spell and needs up to
+  // a minute to wake: that shows as a timeout or a 502/503/504, so the page keeps asking (and shows Generate, disabled,
+  // with the passcode box) instead of deciding "no server". A quick 404 or a network error means there is no server here.
+  var WAKE = { tryMs: 8000, pollMs: 3000, totalMs: 120000 };
+  try { var wk = window.__I3D_WAKE || {}; ['tryMs', 'pollMs', 'totalMs'].forEach(function (k) { if (typeof wk[k] === 'number') WAKE[k] = wk[k]; }); } catch (e) { /* defaults */ }
+  function askHealth() {
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null, timedOut = false;
+    var timer = ctl ? setTimeout(function () { timedOut = true; ctl.abort(); }, WAKE.tryMs) : null;
     return fetch('api/health', ctl ? { signal: ctl.signal } : {})
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j && j.ok === true) { App.serverMode = true; $('gen-panel').hidden = false; $('pass-bar').hidden = false; } })
-      .catch(function () { /* not server mode */ })
-      .then(function () { if (timer) clearTimeout(timer); })
-      .then(function () { return App.serverMode ? loadSliceOptions() : null; });
+      .then(function (r) {
+        if (r.ok) return r.json().then(function (j) { return j && j.ok === true ? 'ok' : 'none'; });
+        return r.status === 502 || r.status === 503 || r.status === 504 ? 'waking' : 'none';
+      })
+      .catch(function () { return timedOut ? 'waking' : 'none'; })
+      .then(function (v) { if (timer) clearTimeout(timer); return v; });
+  }
+  function showGen(statusText) {
+    $('gen-panel').hidden = false; $('pass-bar').hidden = false; $('gen-offline').hidden = true;
+    $('btn-generate').disabled = true; $('gen-status').textContent = statusText;
+  }
+  function checkServer() {
+    if (!/^https?:$/.test(location.protocol) || typeof fetch !== 'function') { $('gen-offline').hidden = false; return Promise.resolve(); }
+    var t0 = Date.now();
+    function loop() {
+      return askHealth().then(function (state) {
+        if (state === 'ok') {
+          App.serverMode = true; $('gen-panel').hidden = false; $('pass-bar').hidden = false; $('gen-offline').hidden = true;
+          $('btn-generate').disabled = false; $('gen-status').textContent = '';
+          return loadSliceOptions();
+        }
+        if (state === 'waking' && Date.now() - t0 < WAKE.totalMs) {
+          showGen('Waking the server. The free plan can take up to a minute; Generate turns on when it is ready. You can type the passcode and choose a photo meanwhile.');
+          return new Promise(function (res) { setTimeout(res, WAKE.pollMs); }).then(loop);
+        }
+        if (state === 'waking') showGen('The server did not wake up. Reload the page to try again.');
+        else $('gen-offline').hidden = false;
+      });
+    }
+    return loop();
   }
 
   // Generate from a photo (Render app only): POST api/generate, the GLB goes into the editor

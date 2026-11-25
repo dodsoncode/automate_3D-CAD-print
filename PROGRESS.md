@@ -470,3 +470,12 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT verified: anything on a real A1 (no A1 print yet; its start sequence, AMS-lite behaviour and the files starting on it); the page on a real phone. The A1 filament/process profile names were checked by the real engine, not by a print.
 - NEXT: Jacob merges when ready, looks at it on the phone, then SL13 (first A1 slice, send, print). Open from before: SL5, SL7, SL9, SL12.
 - BLOCKED: nothing.
+
+### 2026-11-24 - PR #15 merged; Generate and passcode stay visible while the server wakes
+- DONE: PR #15 (printer dropdown P1S and A1) merged to `main` at Jacob's request (3e1efb0). PR #14 (page flow) was merged earlier on 2026-11-24 (c73d0b1).
+- BUG reported by Jacob (confirmed by reading the code, not reproduced on Render): after the new page deployed he saw no "choose picture" and no Generate, only Upload GLB. Root cause: `checkServer()` aborted `/api/health` after 3 s and treated any failure as "no server", which hides the passcode box and Generate; a sleeping Render free instance takes up to about a minute to answer. (Before PR #14 the same thing showed the Hugging Face how-to links instead, which is probably what he saw then.) His rule, now built in: always be able to choose a photo and Generate; the GLB upload stays behind its button.
+- DONE (`image3d/index.html`): health check retries while the answer looks like a sleeping server (timeout after 8 s, or 502/503/504), for up to 2 minutes, every 3 s. While waiting: passcode box and the Generate panel are shown, Generate is disabled and says "Waking the server..."; when the server answers it turns on and the slice options load. After 2 minutes: "The server did not wake up. Reload the page to try again." A quick 404 or network error (the Claude artifact copy, file://) means no server: Generate stays hidden and a note says "Generate from a photo works on the hosted site, not in this copy." Timings can be set in tests with `window.__I3D_WAKE`.
+- Tests: 3 new page tests written first (wakes with a 503 and with a request that never answers; never wakes; no server answers fast) and 1 updated; full suite below. `DEPLOY.md` and `image3d/PROGRESS.md` (Step 27) updated.
+- NOT verified: a real cold start on Render from the phone (the sleeping server was simulated in a desktop browser).
+- NEXT: Jacob says merge; then he reloads the site (it may sit on "Waking the server..." for up to a minute), checks the picture picker and Generate, and tries the first A1 slice (SL13).
+- BLOCKED: nothing.

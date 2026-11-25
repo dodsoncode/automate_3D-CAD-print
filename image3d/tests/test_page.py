@@ -37,7 +37,7 @@ def browser():
         b.close()
 
 
-def new_page(browser, url, init=None):
+def new_page(browser, url, init=None, ready=True):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, accept_downloads=True)
     pg = ctx.new_page()
     if init:
@@ -48,7 +48,8 @@ def new_page(browser, url, init=None):
     pg.on("console", lambda m: pg.errors.append(m.text) if m.type == "error" and not any(i in m.text for i in IGNORED) else None)
     pg.goto(url)
     pg.wait_for_function("window.I3DApp")
-    pg.evaluate("I3DApp.ready")
+    if ready:
+        pg.evaluate("I3DApp.ready")
     return pg
 
 
@@ -75,6 +76,8 @@ def test_loads_without_errors(page):
     assert page.evaluate("typeof I3DApp") == "object"
     assert page.evaluate("I3DApp.serverMode") is False
     assert not page.locator("#gen-panel").is_visible()
+    assert page.locator("#gen-offline").is_visible()       # no server here: say why Generate is not offered
+    assert "hosted site" in page.locator("#gen-offline").inner_text()
     assert page.locator("#howto").count() == 0
     assert page.locator("#btn-upload").inner_text() == "Upload GLB file"
 
@@ -1334,4 +1337,70 @@ def test_the_shortcut_setup_text_message_names_the_printers_shortcut(browser, li
     fill_printer(pg, "192.168.1.60", "a1code22", "a1-part")
     pg.locator("#btn-send-template").tap()
     assert '"Send to A1" Shortcut' in pg.locator("#send-msg").inner_text()
+    pg.context.close()
+
+
+# ---------- a sleeping server (Render free plan) must not hide Generate and the passcode ----------
+FAST_WAKE = "window.__I3D_WAKE = {tryMs: 400, pollMs: 100, totalMs: 6000};"
+
+
+def sleeping_server(pg, mode, state):
+    """Answers api/health like a sleeping Render instance until state['awake']: mode '503' = proxy error page,
+    'hang' = the request is never answered (the page's own timeout gives up on it). Everything else passes through."""
+    def handler(route):
+        if state["awake"]:
+            return route.continue_()
+        state["hits"] += 1
+        if mode == "503":
+            return route.fulfill(status=503, content_type="text/html", body="<html>Service waking up</html>")
+        state["held"].append(route)               # never answered
+    pg.route("**/api/health", handler)
+
+
+def test_generate_and_passcode_show_while_the_server_wakes_up(browser, live_server):
+    for mode in ("503", "hang"):
+        state = {"awake": False, "hits": 0, "held": []}
+        ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+        pg = ctx.new_page()
+        sleeping_server(pg, mode, state)
+        pg.add_init_script(FAST_WAKE)
+        pg.goto(live_server)
+        pg.wait_for_function("window.I3DApp")
+        pg.wait_for_function("document.getElementById('gen-status').textContent.indexOf('Waking') === 0")
+        assert pg.locator("#pass-bar").is_visible() and pg.locator("#gen-panel").is_visible()
+        assert pg.locator("#gen-photo").is_visible() and pg.locator("#btn-generate").is_disabled()
+        assert pg.locator("#gen-offline").is_hidden()
+        assert pg.evaluate("I3DApp.serverMode") is False
+        # the passcode can already be typed while waiting
+        pg.fill("#gen-pass", "sesame")
+        state["awake"] = True
+        pg.wait_for_function("I3DApp.serverMode === true")
+        pg.wait_for_function("!document.getElementById('btn-generate').disabled")
+        assert pg.locator("#gen-status").inner_text() == ""
+        assert pg.input_value("#gen-pass") == "sesame"
+        pg.wait_for_selector("#slice-form:not([hidden])")          # the slice options load once it is awake
+        assert state["hits"] >= 1
+        ctx.close()
+
+
+def test_a_server_that_never_wakes_gets_a_clear_message(browser, live_server):
+    state = {"awake": False, "hits": 0, "held": []}
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+    pg = ctx.new_page()
+    sleeping_server(pg, "503", state)
+    pg.add_init_script("window.__I3D_WAKE = {tryMs: 200, pollMs: 50, totalMs: 600};")
+    pg.goto(live_server)
+    pg.wait_for_function("window.I3DApp")
+    pg.evaluate("I3DApp.ready")
+    assert "did not wake up" in pg.locator("#gen-status").inner_text()
+    assert pg.locator("#gen-panel").is_visible() and pg.locator("#btn-generate").is_disabled()
+    assert pg.evaluate("I3DApp.serverMode") is False
+    ctx.close()
+
+
+def test_a_page_without_a_server_answers_fast_and_does_not_wait(browser, server):
+    pg = new_page(browser, server, FAST_WAKE)          # static files: api/health is a 404 straight away
+    assert pg.evaluate("I3DApp.serverMode") is False
+    assert pg.locator("#gen-panel").is_hidden() and pg.locator("#pass-bar").is_hidden()
+    assert pg.locator("#gen-offline").is_visible()
     pg.context.close()
