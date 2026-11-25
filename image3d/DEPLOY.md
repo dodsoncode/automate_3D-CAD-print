@@ -18,7 +18,7 @@ Status: the Hugging Face call was run for real on 2026-11-11 from Claude's works
 
 ## C. Use it
 1. Open the service URL shown at the top of the Render page (`https://image3d-....onrender.com`).
-2. The Passcode box and the Generate from a photo box (step 1) show up when the server is awake. Type the passcode at the top (the page remembers it on this phone), choose a photo, tap Generate.
+2. The Passcode box and the Generate from a photo box (step 1) are always shown on the hosted site. If the free server is asleep, Generate is greyed with "Waking the server..." (up to about a minute, the page keeps asking for up to 2 minutes) and turns on by itself when the server answers. Type the passcode at the top (the page remembers it on this phone), choose a photo, tap Generate.
 3. Wait a minute or two. The model opens in the editor; then delete pieces, resize, cut and export the STL as usual.
 
 ## Updating to get the slicer

@@ -177,6 +177,9 @@ second **free Render** service next to the mental fitness app.
 ### Step 26 - Printer choice: P1S and A1 (2026-11-24)
 - `slicing.PRINTERS` table; a Printer dropdown first in step 3 (remembered on the phone); the bed size, grid, bed check chip, slice title, the printer's saved IP/access code/file name and the Shortcut name ("Send to P1S" / "Send to A1") follow it. The A1 mini was tried with the real engine and is NOT offered (start sequence purges to Y=200 on a 180 mm bed; our check refuses it). Details in the root `PROGRESS.md`.
 
+### Step 27 - Generate and the passcode no longer vanish when the server sleeps (2026-11-24)
+- Bug (Jacob, night of 2026-11-24): on the new page there was no photo picker and no Generate. Cause: the page decided "server mode" from a single `/api/health` call with a 3 second timeout; a sleeping Render free instance needs up to a minute, so the call timed out and the page hid Generate and the passcode (the same since Generate was added; PR #14 made it more obvious by putting Upload GLB where the picker should be). Fix: the page now keeps asking while the answer looks like a sleeping server (timeout or 502/503/504), shows the passcode box and Generate (disabled, "Waking the server...") meanwhile, and turns Generate on when it answers; a quick 404 or network error still means "no server here" (the Claude artifact copy), which now says so in a note instead of showing nothing. Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
 
 1. **SL13 - first A1 slice:** pick Printer = Bambu A1 in step 3, slice, send to the A1 (own IP and access code), start it on the A1; say what happened.
