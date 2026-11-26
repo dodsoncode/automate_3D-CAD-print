@@ -490,3 +490,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: `DEFAULT_EXTRA` in `image3d/server.py` is now `{}` and `render.yaml` sets `HF_EXTRA_JSON` to `'{}'`, so the Space generates at its own default detail. `HF_EXTRA_JSON` env override still works. DEPLOY.md updated, with a note to run Manual sync on the Render Blueprint after merge.
 - Verification: script-checked (`pytest image3d/tests/test_server.py`, 74 pass). NOT tried on Render or a live Space.
 - NEXT: later detail-level tasks. BLOCKED: nothing (Jacob must run Manual sync after merge).
+
+### 2026-11-26 - Detail levels, Task 2: mesh reduction (`simplify.js`)
+- DONE: `image3d/js/simplify.js` (browser global `I3DSimplify`): `simplifyModel(model, target)` and `simplifyShell(shell, target)`, quadric-error edge collapse with typed arrays and a binary heap. Each shell gets max(4, round(target x its share of triangles)). Collapses are refused if they would break the link condition (stays manifold, so closed stays closed), turn a neighbour triangle's normal past dot 0.2, or go below a tetrahedron; open borders carry a heavy penalty plane. Inputs are not changed; a model already under the target comes back as is. Script tag added after `js/mesh.js` in `index.html`; `image3d.html` rebuilt. Not used by the page yet (Task 3).
+- Tests (written first, `image3d/tests/test_simplify.py`, 9): sphere 20k -> 2,000 (closed, volume and size kept), under target unchanged, budget split with a floor of 4 over 302 shells, flat-faced box does not fold (volume kept exactly), open grid keeps its border, tube stays closed, speed. Speed: 900,000 -> 142,500 triangles in 2.4 s under Node on this machine (bumpy 900k sphere 4.2 s); about 165 MB of working buffers for 900k.
+- Verification: script-checked (Node). NOT verified: speed and memory on an iPhone, a real generated model.
+- NEXT: Task 3, the Detail row in step 2. BLOCKED: nothing.
