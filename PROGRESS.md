@@ -5,13 +5,13 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 
 ## Current status
 
-_(updated at the end of every step)_
+_(updated at the end of every step; as of 2026-11-26)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
-- **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
-- **Send to printer (branch `send-helpers`, PR #13 open):** the slice result can copy a one-line a-Shell command, or open the "Send to P1S" iPhone Shortcut, to send the file to the printer over Wi-Fi. Desktop-tested and checked with a real curl; NOT tried on the phone.
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL9 (try the send box and Shortcut), SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
+- **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13. Confirmed on real hardware: slice on the free instance, download to the phone, upload to the printer over Wi-Fi (a-Shell + curl), the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: two small parts came loose).
+- **Image3D page (merged):** numbered steps 1-4 with the passcode at the top; Printer dropdown for P1S or A1 (the A1 mini is not offered); Generate and the passcode no longer vanish while the Render server wakes up. Mirror and Send to printer are in (desktop-tested; not tried on a phone).
+- **Detail levels (branch `detail-levels`, not yet pushed or merged):** Low / Medium / High / Large row in step 2, server generates at the Space's default detail. Desktop-tested; NOT tried on a phone or Render. After merge Jacob must run Manual sync on the Render Blueprint.
+- **Now:** waiting on Jacob. Jacob's open items for `image3d/`: SL5 (a clean first print), SL7 (try Mirror on the phone), SL9 (try the send box and Shortcut), SL12, SL13 (first A1 slice), SL15 (after merge: Manual sync, try Detail on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -479,3 +479,44 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT verified: a real cold start on Render from the phone (the sleeping server was simulated in a desktop browser).
 - NEXT: Jacob says merge; then he reloads the site (it may sit on "Waking the server..." for up to a minute), checks the picture picker and Generate, and tries the first A1 slice (SL13).
 - BLOCKED: nothing.
+
+### 2026-11-26 - PR #16 merged; Detail levels started
+- DONE: PR #16 (Generate and passcode stay visible while the server wakes) merged to `main` (394f876) on 2026-11-25 at Jacob's request.
+- DONE: Jacob asked for a triangle-count control with a full-detail option for Bambu Studio and said "start this now" (displaces the rest of this week's time for the bird color-by-number book; likely 1-3 h over the weekly budget). He chose approach B (always generate at full detail, reduce in the page) and approved the design: `docs/superpowers/specs/2026-11-26-detail-levels-design.md`. TASKS SL14, SL15 added.
+- NEXT: plan, then build on branch `detail-levels`.
+- BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 1: server generates at full detail
+- DONE: `DEFAULT_EXTRA` in `image3d/server.py` is now `{}` and `render.yaml` sets `HF_EXTRA_JSON` to `'{}'`, so the Space generates at its own default detail. `HF_EXTRA_JSON` env override still works. DEPLOY.md updated, with a note to run Manual sync on the Render Blueprint after merge.
+- Verification: script-checked (`pytest image3d/tests/test_server.py`, 74 pass). NOT tried on Render or a live Space.
+- NEXT: later detail-level tasks. BLOCKED: nothing (Jacob must run Manual sync after merge).
+
+### 2026-11-26 - Detail levels, Task 2: mesh reduction (`simplify.js`)
+- DONE: `image3d/js/simplify.js` (browser global `I3DSimplify`): `simplifyModel(model, target)` and `simplifyShell(shell, target)`, quadric-error edge collapse with typed arrays and a binary heap. Each shell gets max(4, round(target x its share of triangles)). Collapses are refused if they would break the link condition (stays manifold, so closed stays closed), turn a neighbour triangle's normal past dot 0.2, or go below a tetrahedron; open borders carry a heavy penalty plane. Inputs are not changed; a model already under the target comes back as is. Script tag added after `js/mesh.js` in `index.html`; `image3d.html` rebuilt. Not used by the page yet (Task 3).
+- Tests (written first, `image3d/tests/test_simplify.py`, 9): sphere 20k -> 2,000 (closed, volume and size kept), under target unchanged, budget split with a floor of 4 over 302 shells, flat-faced box does not fold (volume kept exactly), open grid keeps its border, tube stays closed, speed. Speed: 900,000 -> 142,500 triangles in 2.4 s under Node on this machine (bumpy 900k sphere 4.2 s); about 165 MB of working buffers for 900k.
+- Verification: script-checked (Node). NOT verified: speed and memory on an iPhone, a real generated model.
+- NEXT: Task 3, the Detail row in step 2. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 2 review follow-ups
+- DONE: a target that is not a finite positive number (null, NaN, 0, negative) now returns the model unchanged (test added); the tube test checks it was really reduced; new speed case 900,000 -> 25,000 (about 3 s under Node); the module header claims Node speed only. `image3d.html` rebuilt.
+- Verification: script-checked (`test_simplify.py` + `test_mesh.py`, 39 pass). NEXT: Task 3. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 3: Detail row in step 2
+- DONE: `image3d/index.html`: a **Detail** row first in step 2 (Low 25,000, Medium 60,000, High = 95% of the slicer limit, 142,500 by default, Large = the model as generated), with `#detail-info` showing the triangle count ("917,000 triangles - as loaded", "24,998 triangles - Low", "... - edited"). The active level is highlighted (`aria-pressed`). Every level is made from `state.original` (the model as opened/generated), so switching never loses detail. A model already under a level says "Already under 60,000 triangles; nothing changed." After an edit, choosing a level says it "starts again from the model as generated" and Undo brings the edits back. The status shows "Reducing..." (one frame is let through to paint) while the work runs on the main thread; buttons are disabled meanwhile. Undo keeps 2 steps above 500,000 triangles (5 above 100,000, 20 otherwise). Slice hint for too many triangles ends "- Tap Detail: High". `image3d.html` rebuilt.
+- Tests (written first, 13 new + 1 updated in `test_page.py`; big spheres made in the page and opened through `openBytes`): full `python -m pytest -q image3d/tests gui/tests`: 434 passed. Measured in headless Chromium on this machine with a 900,000-triangle sphere: open 4 s; Low 3.0-3.3 s, Medium 3.2 s, High 3.0 s (reduction alone 2.5-3.3 s); Large about 2.8 s (page refresh of 900k triangles).
+- Verification: desktop-tested (Playwright, 390 px). NOT verified: speed and memory on Jacob's iPhone; a real generated model.
+- NEXT: remaining detail-levels tasks (docs, PR). BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 3 review follow-ups
+- DONE: Large on the model as loaded (unedited) adds no undo step and no re-render; it marks Large and says "Already the model as generated." "Already at <level>" only when the model was made with today's target (the target is remembered, also in undo steps), so High is recomputed after the server's slice limit arrives. `triangleCount()` reuses `countOf`. Tests tidied (one Detail heading check, no unasserted tap, no printing); 2 new page tests. `image3d.html` rebuilt.
+- Verification: desktop-tested; full `python -m pytest -q image3d/tests gui/tests`: 436 passed. NEXT: remaining detail-levels tasks. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 4: docs and full test run
+- DONE: `image3d/PRINTING.md` and `image3d/README.md` describe the Detail row (Low / Medium / High / Large; Large is for Bambu Studio via Export STL, the site's Slice needs High or lower); `image3d/PROGRESS.md` Step 28 and SL15 in "What Jacob does next"; `TASKS.md` SL14 checked (desktop-tested); "Current status" above refreshed.
+- Verification: `python -m pytest -q image3d/tests gui/tests`: 436 passed (4 min 12 s); `cd firmware && python -m pytest -q`: 39 passed. Step 2 screenshot at 390x844 with `two_cubes.stl` looked right (Detail row first, "24 triangles - as loaded"); the "Opened ..." status line overlaps the step-1 note text slightly. NOT verified: a phone, Render, a real generated model.
+- NEXT: push and PR (controller); after merge Jacob runs Manual sync on the Render Blueprint, then SL15. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, final review fixes
+- DONE: (1) a level whose target the original already fits is no longer refused when the model is not the original: High/Medium after Low now restores the original ("The model as generated is already under N triangles."). (2) When the unedited original already fits, that level is marked active (aria-pressed, info line). (3) High re-runs once from the original with the target scaled by limit/result if still over the slicer limit; the slice hint says "Too many small pieces to slice here - tap Remove tiny bits, or Export STL for Bambu Studio" when the level is High (or the model was edited after High). (4) `image3d/DEPLOY.md` no longer calls 900,000 triangles too heavy; full detail is the default and the Detail buttons reduce it. (5) `image3d/README.md` lists `js/simplify.js` and `tests/test_simplify.py`. `image3d.html` rebuilt.
+- Verification: desktop-tested (Playwright). The second-pass reduction itself has no test that forces a first pass over the limit (script-checked by reading only). NEXT: push and PR (controller). BLOCKED: nothing.
+

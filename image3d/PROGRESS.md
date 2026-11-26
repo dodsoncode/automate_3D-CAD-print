@@ -180,7 +180,12 @@ second **free Render** service next to the mental fitness app.
 ### Step 27 - Generate and the passcode no longer vanish when the server sleeps (2026-11-24)
 - Bug (Jacob, night of 2026-11-24): on the new page there was no photo picker and no Generate. Cause: the page decided "server mode" from a single `/api/health` call with a 3 second timeout; a sleeping Render free instance needs up to a minute, so the call timed out and the page hid Generate and the passcode (the same since Generate was added; PR #14 made it more obvious by putting Upload GLB where the picker should be). Fix: the page now keeps asking while the answer looks like a sleeping server (timeout or 502/503/504), shows the passcode box and Generate (disabled, "Waking the server...") meanwhile, and turns Generate on when it answers; a quick 404 or network error still means "no server here" (the Claude artifact copy), which now says so in a note instead of showing nothing. Details in the root `PROGRESS.md`.
 
+### Step 28 - Detail levels (2026-11-26)
+- The server generates at the Hugging Face Space's default detail (no `octree_resolution` override; `render.yaml` `HF_EXTRA_JSON` is `'{}'`). New `js/simplify.js` (quadric edge collapse, closed models stay closed). Step 2 has a Detail row first: Low 25,000, Medium 60,000, High 142,500 (95% of the slicer limit), Large = exactly as generated (for Bambu Studio; ~900,000 triangles is a ~45 MB STL). Each level is computed from the model as loaded; after an edit a level starts again from the model as generated (Undo brings the edit back). Slice hint says "Tap Detail: High" when over the limit. Undo keeps 2 steps above 500,000 triangles. Desktop browser: about 3 s per level on a 900k model, page frozen meanwhile. Verification: script-checked and desktop-tested; NOT on a phone or Render. Details in the root `PROGRESS.md`.
+
 ## What Jacob does next
+
+1. **SL15 - Detail levels:** after the merge, run Manual sync on the Render Blueprint, then generate one model and try the Detail buttons on the phone; note how long Low takes.
 
 1. **SL13 - first A1 slice:** pick Printer = Bambu A1 in step 3, slice, send to the A1 (own IP and access code), start it on the A1; say what happened.
 1. **SL9 - try the send box:** after the next merge and redeploy, slice, open "Send to printer from this phone", fill it in, tap Copy a-Shell command, paste into a-Shell. Then set up the Shortcut ([`PRINTING.md`](PRINTING.md)) and try Send with Shortcut.

@@ -9,6 +9,13 @@ The first choice in each list is the default.
 - **Plate:** Textured PEI (default), Cool Plate, Smooth PEI (High Temp). Pick the plate that is physically on the printer.
 - **Supports:** Off (default) or Tree (auto), which adds tree supports where the model needs them.
 
+## Detail (step 2, first row)
+Big models make big files and slow slices. The Detail row in step 2 sets how many triangles the model has:
+- **Low** about 25,000, **Medium** about 60,000, **High** about 142,500 (just under the slicer's limit of 150,000).
+- **Large** is the model exactly as it was generated, for slicing in Bambu Studio on a computer: tap Export STL in step 3 (a ~900,000-triangle STL is about 45 MB). The site's Slice cannot take Large; it needs High or lower, and says "Tap Detail: High" when the model is over the limit.
+- Each level starts from the model as it was opened, so you can switch back and forth without losing detail. After you edit (delete, cut, mirror), a level starts again from the model as generated; Undo brings your edit back.
+- On a big model the page freezes for a few seconds after "Reducing..." (about 3 s on a desktop browser; not measured on a phone).
+
 ## Steps
 1. In the editor, get the model the way you want it, then in step 3 choose the Printer and the four settings.
 2. Type the passcode in the Passcode box at the very top of the page first (the steps below have no passcode field; with the box empty the page says "Enter the passcode at the top first"). Then tap Slice and keep the screen open. When it is done, tap Download print file. You get `model.gcode.3mf`.

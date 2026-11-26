@@ -17,6 +17,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, mirror, closed check) and STL read/write |
 | `vendor/earcut.min.js` | Polygon triangulation for cut caps (earcut 2.2.4, ISC; see `vendor/LICENSES.txt`) |
 | Slicer licences | the slicer engine (npm `orcaslicer-addon`, AGPL-3.0-only) and OrcaSlicer's Bambu profiles (AGPL-3.0) are downloaded at build time and run unmodified in a separate process; nothing from them is committed to this repo. Revisit the licence terms if the service is ever opened to other people. |
+| `js/simplify.js` | Triangle reduction (quadric edge collapse) for the Detail buttons |
 | `js/glb.js`, `js/obj.js`, `js/readany.js` | File readers (GLB, OBJ; `readany.js` picks by extension, STL goes through `stl.js`) |
 | `server.py` | FastAPI app for Render: serves the page, `GET /api/health`, `POST /api/generate` via a Hugging Face Space, and the slice job routes (`GET /api/slice/options`, `POST /api/slice`, `GET /api/slice/{id}`, `GET /api/slice/{id}/file`) |
 | `slicing.py`, `slicer/` | Slice for P1S: OrcaSlicer engine wrapper with option tables, model centring and the G-code safety checks; `slicer/install.sh` installs Node, the engine and Bambu's profiles at build time (always exits 0) |
@@ -24,15 +25,18 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `requirements.txt` | Python dependencies for the server |
 | `../render.yaml` | Render Blueprint (free web service, `rootDir: image3d`) |
 | `DEPLOY.md` | Phone steps for the Hugging Face token and the Render deploy, plus troubleshooting |
-| `tests/` | `test_mesh.py`, `test_readers.py`, `test_page.py`, `test_server.py`, `test_slicing.py`, `make_samples.py`, `samples/`; `e2e_slice.py` is a script (not run by pytest) for a real slice through the real server |
+| `tests/` | `test_mesh.py`, `test_readers.py`, `test_simplify.py`, `test_page.py`, `test_server.py`, `test_slicing.py`, `make_samples.py`, `samples/`; `e2e_slice.py` is a script (not run by pytest) for a real slice through the real server |
 
 ## Tests
 
 - `python -m pytest -q image3d/tests` (the browser tests at 390 px wide need Playwright + Chromium).
 - Everything incl. existing tests: `python -m pytest -q image3d/tests gui/tests && (cd firmware && python -m pytest -q)`.
 
+## Detail levels (step 2)
+The first row in step 2 sets the triangle count: Low 25,000, Medium 60,000, High 142,500 (95% of the slicer limit), Large = the model exactly as generated. Large is for slicing in Bambu Studio (Export STL; about 45 MB for 900,000 triangles); the site's Slice needs High or lower. Reduction is `js/simplify.js` (quadric edge collapse, closed models stay closed). The server now generates at the Hugging Face Space's default detail. See [PRINTING.md](PRINTING.md).
+
 ## Slice for P1S or A1 (Render version only)
-Step 3 of the page (Slice) turns the current model into `model.gcode.3mf` for a Bambu P1S or A1 (0.4 mm nozzle; choose the Printer first, the page remembers it): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles. Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement; that figure adds two separate processes from a direct run and is not the server's real footprint on Render).
+Step 3 of the page (Slice) turns the current model into `model.gcode.3mf` for a Bambu P1S or A1 (0.4 mm nozzle; choose the Printer first, the page remembers it): choose filament, quality, plate and supports, tap Slice, download. The page shows "Slicer unavailable" if the server has no working slicer; everything else is unaffected. Model limit 150,000 triangles (use Detail: High or lower). Before a file is offered it is checked (printer model, nozzle, your four choices, every extruding move inside the bed). Phone steps for the settings, getting the file to the printer and the first print: [PRINTING.md](PRINTING.md). Deploy step and how to check it installed: [DEPLOY.md](DEPLOY.md). Real-engine run: `python image3d/tests/e2e_slice.py` (add `--direct` for the memory measurement; that figure adds two separate processes from a direct run and is not the server's real footprint on Render).
 
 ## Verification status
 
