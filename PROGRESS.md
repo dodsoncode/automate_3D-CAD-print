@@ -506,3 +506,7 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests (written first, 13 new + 1 updated in `test_page.py`; big spheres made in the page and opened through `openBytes`): full `python -m pytest -q image3d/tests gui/tests`: 434 passed. Measured in headless Chromium on this machine with a 900,000-triangle sphere: open 4 s; Low 3.0-3.3 s, Medium 3.2 s, High 3.0 s (reduction alone 2.5-3.3 s); Large about 2.8 s (page refresh of 900k triangles).
 - Verification: desktop-tested (Playwright, 390 px). NOT verified: speed and memory on Jacob's iPhone; a real generated model.
 - NEXT: remaining detail-levels tasks (docs, PR). BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 3 review follow-ups
+- DONE: Large on the model as loaded (unedited) adds no undo step and no re-render; it marks Large and says "Already the model as generated." "Already at <level>" only when the model was made with today's target (the target is remembered, also in undo steps), so High is recomputed after the server's slice limit arrives. `triangleCount()` reuses `countOf`. Tests tidied (one Detail heading check, no unasserted tap, no printing); 2 new page tests. `image3d.html` rebuilt.
+- Verification: desktop-tested; full `python -m pytest -q image3d/tests gui/tests`: 436 passed. NEXT: remaining detail-levels tasks. BLOCKED: nothing.

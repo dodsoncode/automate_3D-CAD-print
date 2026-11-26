@@ -1442,7 +1442,6 @@ def near(n, target):
 
 
 def test_detail_row_is_first_in_edit(page):
-    assert page.locator("#step-2 h3").first.inner_text().lower() == "detail"
     assert page.locator("#step-2 h3").first.text_content() == "Detail"
     labels = page.locator("#step-2 [id^=detail-]").evaluate_all("es => es.filter(e => e.tagName === 'BUTTON').map(e => e.textContent)")
     assert labels == ["Low", "Medium", "High", "Large"]
@@ -1495,7 +1494,6 @@ def test_switching_does_not_lose_detail(page):
 
 def test_detail_shows_reducing_while_it_works(page):
     open_sphere(page, 30000)
-    page.locator("#detail-medium").tap()                  # 30,000 is under 60,000: nothing to do
     # read the status in the same turn as the tap, before the deferred reduction runs
     now = page.evaluate("(() => { document.getElementById('detail-low').click(); return [document.getElementById('msg').textContent, I3DApp.detailBusy(), document.getElementById('detail-high').disabled]; })()")
     assert now == ["Reducing...", True, True]
@@ -1563,14 +1561,47 @@ def test_undo_limit_tiers(page):
 
 
 def test_detail_low_on_a_full_detail_model(page):
-    """About 900,000 triangles (a full-detail generation): Low finishes, the model stays closed; time is printed."""
-    import time
+    """About 900,000 triangles (a full-detail generation): Low finishes and the model stays closed."""
     open_sphere(page, 900000)
     assert page.locator("#detail-info").inner_text() == "900,000 triangles - as loaded"
-    t0 = time.time()
     tap_detail(page, "low", timeout=120000)
-    took = time.time() - t0
-    print("\nLow on 900,000 triangles in the test browser: %.1f s" % took)
     assert near(tri_count(page), 25000)
     assert page.evaluate("I3DApp.state.model.every(I3D.mesh.isClosed)")
     assert page.errors == []
+
+
+def test_detail_large_on_the_model_as_loaded_adds_no_undo_step(page):
+    open_sphere(page, 30000)
+    page.locator("#btn-rot-x").tap()
+    page.locator("#btn-undo").tap()                       # back to the model as loaded, undo stack empty
+    assert page.evaluate("I3DApp.undoDepth()") == 0
+    page.locator("#detail-large").tap()
+    assert page.evaluate("I3DApp.detailBusy()") is False   # nothing deferred, nothing re-rendered
+    assert page.locator("#msg").inner_text() == "Already the model as generated."
+    assert page.evaluate("I3DApp.undoDepth()") == 0 and page.locator("#btn-undo").is_disabled()
+    assert page.get_attribute("#detail-large", "aria-pressed") == "true"
+    assert page.locator("#detail-info").inner_text() == "30,000 triangles - Large (as generated)"
+
+
+def test_detail_high_is_recomputed_when_the_slice_limit_arrives_later(browser, server):
+    """The server's slice options answer after High was chosen with a lower limit: High again is recomputed."""
+    held = []
+    pg = new_page(browser, server, ready=False)
+    pg.route("**/api/health", lambda r: r.fulfill(json={"ok": True}))
+    pg.route("**/api/slice/options", lambda r: held.append(r))
+    pg.reload()
+    pg.wait_for_function("window.I3DApp")
+    pg.wait_for_function("document.getElementById('gen-panel').hidden === false")
+    open_sphere(pg, 200000)
+    tap_detail(pg, "high")
+    assert near(tri_count(pg), 142500)
+    tap_detail(pg, "high")
+    assert pg.locator("#msg").inner_text() == "Already at High."
+    assert held
+    held[0].fulfill(json={"available": True, "limits": {"max_triangles": 100000}})
+    pg.wait_for_function("I3DApp.detailTargets().high === 95000")
+    tap_detail(pg, "high")
+    assert near(tri_count(pg), 95000)
+    assert pg.locator("#detail-info").inner_text() == "{:,} triangles - High".format(tri_count(pg))
+    assert pg.errors == []
+    pg.context.close()
