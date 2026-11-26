@@ -70,6 +70,8 @@
   #send-msg:empty { display: none; }
   #send-msg.err { color: #a11; }
   .val { text-align: center; font-variant-numeric: tabular-nums; }
+  #detail-row button[aria-pressed=true] { background: #fff1dc; border-color: #f08c00; font-weight: 600; }
+  #detail-info { margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -98,6 +100,10 @@
     <section class="step locked" id="step-2">
       <h2><span class="num">2</span>Edit</h2>
       <div class="step-lock small">Load a model first.</div>
+    <h3>Detail</h3>
+    <div class="row" id="detail-row"><button id="detail-low" aria-pressed="false">Low</button><button id="detail-medium" aria-pressed="false">Medium</button><button id="detail-high" aria-pressed="false">High</button><button id="detail-large" aria-pressed="false">Large</button></div>
+    <div id="detail-info" class="small"></div>
+
     <h3>Pieces</h3>
     <div id="pieces"></div>
     <div class="row"><button id="btn-delete">Delete selected</button><button id="btn-keep-largest">Keep largest</button></div>
@@ -2207,7 +2213,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   'use strict';
   var M = I3D.mesh, $ = function (id) { return document.getElementById(id); };
   var AX = { x: 0, y: 1, z: 2 };
-  var state = { model: [], selected: -1 };
+  // original: the model as loaded or generated (never changed by edits); level: the detail level shown (null: none);
+  // edited: an edit other than a detail change since the model was opened
+  var state = { model: [], selected: -1, original: null, level: null, edited: false };
   var undoStack = [], BED = 256, LIST_MAX = 30;
   var App = { state: state, serverMode: false };
   Object.defineProperty(App, 'bed', { get: function () { return BED; } });
@@ -2349,7 +2357,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function updateCutLabel() { $('cut-val').textContent = fmt(parseFloat($('cut-pos').value) || 0) + ' mm'; }
   function refresh() {
-    cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); rebuildMeshes();
+    cutActive = false; refreshList(); refreshChecks(); resetCutRange(); refreshSize(); refreshDetail(); rebuildMeshes();
     $('btn-undo').disabled = !undoStack.length;
     var has = state.model.length > 0;
     $('step-2').classList.toggle('locked', !has); $('step-3').classList.toggle('locked', !has);
@@ -2358,24 +2366,66 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   function select(i) { state.selected = i; refreshList(); rebuildMeshes(); }
 
   // ---------- model operations ----------
-  // undo memory: 20 steps up to 100,000 triangles in total, 5 steps above that
+  // undo memory: 20 steps up to 100,000 triangles in total, 5 steps above that, 2 above 500,000
   function undoLimit() {
-    var n = 0; state.model.forEach(function (sh) { n += sh.t.length / 3; });
-    return n > 100000 ? 5 : 20;
+    var n = triangleCount();
+    return n > 500000 ? 2 : n > 100000 ? 5 : 20;
   }
-  function apply(fn, okMsg) {
+  // level: set for a detail change (the new model is that level); left out for any other edit
+  function apply(fn, okMsg, level) {
     var next;
     try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : e.message === 'mirror plane misses the model' ? 'Move the slider so the plane crosses the model, then tap Mirror.' : String(e.message || e), true); return false; }
-    undoStack.push(state.model); while (undoStack.length > undoLimit()) undoStack.shift();
+    undoStack.push({ model: state.model, level: state.level, edited: state.edited }); while (undoStack.length > undoLimit()) undoStack.shift();
     state.model = next; state.selected = -1;
+    if (level) { state.level = level; state.edited = false; } else { state.level = null; state.edited = true; }
     refresh(); msg(okMsg || '');
     return true;
   }
   function undo() {
     if (!undoStack.length) { msg('Nothing to undo.'); return; }
-    state.model = undoStack.pop(); state.selected = -1; refresh(); msg('Undone.');
+    var u = undoStack.pop();
+    state.model = u.model; state.level = u.level; state.edited = u.edited; state.selected = -1; refresh(); msg('Undone.');
   }
   function needModel() { if (!state.model.length) { msg('Open a model first.', true); return false; } return true; }
+
+  // ---------- detail levels: every level is made from state.original, so switching never loses detail ----------
+  var LEVELS = ['low', 'medium', 'high', 'large'], LEVEL_NAME = { low: 'Low', medium: 'Medium', high: 'High', large: 'Large (as generated)' };
+  var reducing = false;
+  function num(n) { return n.toLocaleString('en-US'); }
+  function countOf(model) { var n = 0; model.forEach(function (sh) { n += sh.t.length / 3; }); return n; }
+  // High stays sliceable here: 95% of the slicer's triangle limit (the server's, or 150,000 without one)
+  function detailTargets() { return { low: 25000, medium: 60000, high: Math.floor(sliceLimit * 0.95) }; }
+  function refreshDetail() {
+    var t = detailTargets();
+    LEVELS.forEach(function (k) {
+      var b = $('detail-' + k);
+      b.setAttribute('aria-pressed', state.level === k ? 'true' : 'false');
+      b.disabled = reducing;
+      b.title = k === 'large' ? 'The model as generated, full detail (for Bambu Studio)' : 'About ' + num(t[k]) + ' triangles' + (k === 'high' ? ' (sliceable here)' : '');
+    });
+    $('detail-info').textContent = state.model.length ? num(triangleCount()) + ' triangles - ' + (state.level ? LEVEL_NAME[state.level] : state.edited ? 'edited' : 'as loaded') : '';
+  }
+  function chooseDetail(level) {
+    if (reducing || !needModel() || !state.original) return;
+    var orig = state.original, target = level === 'large' ? Infinity : detailTargets()[level], have = countOf(orig);
+    if (!state.edited && state.level === level) { msg('Already at ' + LEVEL_NAME[level] + '.'); return; }
+    if (level !== 'large' && have <= target && !state.edited) { msg('Already under ' + num(target) + ' triangles; nothing changed.'); return; }
+    var reduce = have > target;
+    reducing = true; refreshDetail(); msg(reduce ? 'Reducing...' : 'Loading the model as generated...');
+    var run = function () {
+      reducing = false;
+      if (state.original !== orig) { refreshDetail(); return; }   // another model was opened meanwhile
+      var again = state.edited ? ' This starts again from the model as generated; Undo brings your edits back.' : '';
+      if (!apply(function () { return reduce ? I3DSimplify.simplifyModel(orig, target) : orig; }, '', level)) { refreshDetail(); return; }
+      msg((level === 'large' ? 'Large: the model as generated (' + num(have) + ' triangles), for Bambu Studio.'
+        : reduce ? LEVEL_NAME[level] + ': ' + num(triangleCount()) + ' triangles.'
+        : 'The model as generated is already under ' + num(target) + ' triangles.') + again);
+    };
+    // let the status paint before the work (on the main thread) starts
+    if (document.hidden || typeof requestAnimationFrame !== 'function') setTimeout(run, 0);
+    else requestAnimationFrame(function () { setTimeout(run, 0); });
+  }
+  LEVELS.forEach(function (k) { $('detail-' + k).addEventListener('click', function () { chooseDetail(k); }); });
 
   function openBytes(name, bytes) {
     var soup, shells;
@@ -2395,6 +2445,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     var note = '', s = M.bbox(shells).size, longest = Math.max(s[0], s[1], s[2]);
     if (longest < 5 || longest > 256) { shells = M.scaleToLongest(shells, 100); note = 'Resized to 100 mm'; }
     state.model = M.layFlat(shells); state.selected = -1; undoStack = []; needsFit = true;
+    state.original = state.model; state.level = null; state.edited = false;
     refresh(); msg(note || 'Opened ' + name);
     return true;
   }
@@ -2603,7 +2654,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     var hint = '', off = false, n = triangleCount();
     if (slicing) off = true;
     else if (!state.model.length) { off = true; hint = 'Open a model to slice it.'; }
-    else if (n > sliceLimit) { off = true; hint = 'Model too detailed to slice here (' + n.toLocaleString('en-US') + ' triangles, limit ' + sliceLimit.toLocaleString('en-US') + ') - generate a lighter model'; }
+    else if (n > sliceLimit) { off = true; hint = 'Model too detailed to slice here (' + n.toLocaleString('en-US') + ' triangles, limit ' + sliceLimit.toLocaleString('en-US') + ') - Tap Detail: High'; }
     else if (!state.model.every(M.isClosed)) hint = 'Model is not closed - slicing may fail';
     $('btn-slice').disabled = off; $('slice-hint').textContent = hint;
     SLICE_SELECTS.forEach(function (k) { $('slice-' + k).disabled = slicing; });
@@ -2853,7 +2904,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (slicePrinters.some(function (p) { return p.id === want; })) ps.value = want;
       applyPrinter();
       updatePlates(); sliceStatus('');
-      $('slice-form').hidden = false; $('step3-name').textContent = 'Slice'; $('step-4').hidden = false; sliceReady = true; updateSliceControls();
+      $('slice-form').hidden = false; $('step3-name').textContent = 'Slice'; $('step-4').hidden = false; sliceReady = true; updateSliceControls(); refreshDetail();
       var id = savedJob();
       if (id && !slicing) {
         sliceStale = state.model.length > 0;   // a model is already open: the saved file may not be for it, so it is discarded
@@ -2864,7 +2915,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   initView();
   refresh();
-  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
+  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.detailTargets = detailTargets;
+  App.detailBusy = function () { return reducing; }; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
   App.ready = checkServer();
   window.I3DApp = App;
 })();

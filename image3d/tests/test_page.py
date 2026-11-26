@@ -605,7 +605,7 @@ def test_slice_blocked_for_too_many_triangles(browser, tiny_limit_server):
     pg = new_page(browser, tiny_limit_server)
     open_sample(pg, "two_cubes.stl", rows=2)
     assert pg.locator("#btn-slice").is_disabled()
-    assert pg.locator("#slice-hint").inner_text() == "Model too detailed to slice here (24 triangles, limit 10) - generate a lighter model"
+    assert pg.locator("#slice-hint").inner_text() == "Model too detailed to slice here (24 triangles, limit 10) - Tap Detail: High"
     pg.context.close()
 
 
@@ -1404,3 +1404,173 @@ def test_a_page_without_a_server_answers_fast_and_does_not_wait(browser, server)
     assert pg.locator("#gen-panel").is_hidden() and pg.locator("#pass-bar").is_hidden()
     assert pg.locator("#gen-offline").is_visible()
     pg.context.close()
+
+
+# ---------- Detail row (Low / Medium / High / Large) ----------
+# Big samples are made in the page: a closed, outward UV sphere with 2 * lon * (lat - 1) triangles, written with the
+# page's own STL writer and opened through I3DApp.openBytes (the same path as a file), so state.original is set normally.
+SPHERE_JS = """([lon, lat]) => {
+  const r = 40, v = [0, 0, r], t = [];
+  for (let i = 1; i < lat; i++) { const th = Math.PI * i / lat;
+    for (let j = 0; j < lon; j++) { const ph = 2 * Math.PI * j / lon; v.push(r * Math.sin(th) * Math.cos(ph), r * Math.sin(th) * Math.sin(ph), r * Math.cos(th)); } }
+  v.push(0, 0, -r);
+  const S = v.length / 3 - 1, ring = (i, j) => 1 + (i - 1) * lon + ((j % lon) + lon) % lon;
+  for (let j = 0; j < lon; j++) t.push(0, ring(1, j), ring(1, j + 1));
+  for (let i = 1; i < lat - 1; i++) for (let j = 0; j < lon; j++) { const a = ring(i, j), b = ring(i, j + 1), c = ring(i + 1, j), d = ring(i + 1, j + 1); t.push(a, c, d, a, d, b); }
+  for (let j = 0; j < lon; j++) t.push(S, ring(lat - 1, j + 1), ring(lat - 1, j));
+  return I3DApp.openBytes('sphere.stl', I3D.stl.write([{v: v, t: t}], 'sphere'));
+}"""
+SPHERES = {30000: (150, 101), 200000: (500, 201), 900000: (1500, 301)}
+
+
+def open_sphere(pg, tris):
+    assert pg.evaluate(SPHERE_JS, list(SPHERES[tris])) is True
+    assert tri_count(pg) == tris
+
+
+def tri_count(pg):
+    return pg.evaluate("I3DApp.state.model.reduce((n, s) => n + s.t.length / 3, 0)")
+
+
+def tap_detail(pg, level, timeout=60000):
+    pg.locator("#detail-" + level).tap()
+    pg.wait_for_function("!I3DApp.detailBusy()", timeout=timeout)
+
+
+def near(n, target):
+    return 0.9 * target <= n <= target
+
+
+def test_detail_row_is_first_in_edit(page):
+    assert page.locator("#step-2 h3").first.inner_text().lower() == "detail"
+    assert page.locator("#step-2 h3").first.text_content() == "Detail"
+    labels = page.locator("#step-2 [id^=detail-]").evaluate_all("es => es.filter(e => e.tagName === 'BUTTON').map(e => e.textContent)")
+    assert labels == ["Low", "Medium", "High", "Large"]
+    order = page.evaluate("['detail-low','detail-info','pieces'].map(i => document.getElementById(i).getBoundingClientRect().top)")
+    assert order == sorted(order)
+
+
+def test_detail_levels_and_info(page):
+    open_sphere(page, 30000)
+    assert page.locator("#detail-info").inner_text() == "30,000 triangles - as loaded"
+    assert page.locator("#step-2 [aria-pressed=true]").count() == 0
+    tap_detail(page, "low")
+    n = tri_count(page)
+    assert near(n, 25000)
+    assert page.locator("#detail-info").inner_text() == "{:,} triangles - Low".format(n)
+    assert page.get_attribute("#detail-low", "aria-pressed") == "true"
+    assert page.locator("#step-2 [aria-pressed=true]").count() == 1
+    assert page.evaluate("I3DApp.state.model.every(I3D.mesh.isClosed)")
+    tap_detail(page, "large")
+    assert tri_count(page) == 30000
+    assert page.locator("#detail-info").inner_text() == "30,000 triangles - Large (as generated)"
+    assert page.get_attribute("#detail-large", "aria-pressed") == "true"
+    assert page.get_attribute("#detail-low", "aria-pressed") == "false"
+    assert page.errors == []
+
+
+def test_high_is_95_percent_of_the_slice_limit(browser, live_server, page):
+    assert page.evaluate("I3DApp.detailTargets()") == {"low": 25000, "medium": 60000, "high": 142500}
+    pg = new_page(browser, live_server)
+    assert pg.evaluate("I3DApp.detailTargets().high") == 142500
+    pg.context.close()
+
+
+def test_high_follows_the_server_limit(browser, tiny_limit_server):
+    pg = new_page(browser, tiny_limit_server)            # server limit 10 triangles
+    assert pg.evaluate("I3DApp.detailTargets().high") == 9
+    pg.context.close()
+
+
+def test_switching_does_not_lose_detail(page):
+    open_sphere(page, 200000)
+    tap_detail(page, "low")
+    assert near(tri_count(page), 25000)
+    tap_detail(page, "high")
+    n = tri_count(page)
+    assert n > 60000 and near(n, 142500)                 # computed from the original, not from Low
+    assert page.locator("#detail-info").inner_text() == "{:,} triangles - High".format(n)
+    assert page.errors == []
+
+
+def test_detail_shows_reducing_while_it_works(page):
+    open_sphere(page, 30000)
+    page.locator("#detail-medium").tap()                  # 30,000 is under 60,000: nothing to do
+    # read the status in the same turn as the tap, before the deferred reduction runs
+    now = page.evaluate("(() => { document.getElementById('detail-low').click(); return [document.getElementById('msg').textContent, I3DApp.detailBusy(), document.getElementById('detail-high').disabled]; })()")
+    assert now == ["Reducing...", True, True]
+    page.wait_for_function("!I3DApp.detailBusy()")
+    assert page.locator("#detail-high").is_enabled()
+    assert page.locator("#msg").inner_text().startswith("Low: ")
+
+
+def test_under_target_says_so(page):
+    open_sample(page, "two_cubes.stl", rows=2)
+    before = tri_count(page)
+    tap_detail(page, "medium")
+    assert page.locator("#msg").inner_text() == "Already under 60,000 triangles; nothing changed."
+    assert tri_count(page) == before and rows(page) == 2
+    assert page.locator("#btn-undo").is_disabled()
+    assert page.locator("#detail-info").inner_text() == "24 triangles - as loaded"
+
+
+def test_level_after_edit_warns_and_undo_restores(page):
+    open_sphere(page, 30000)
+    page.locator("#btn-cut").tap()
+    cut = tri_count(page)
+    assert cut != 30000
+    assert page.locator("#detail-info").inner_text() == "{:,} triangles - edited".format(cut)
+    tap_detail(page, "low")
+    assert "starts again from the model as generated" in page.locator("#msg").inner_text()
+    assert near(tri_count(page), 25000)
+    page.locator("#btn-undo").tap()
+    assert tri_count(page) == cut
+    assert page.locator("#detail-info").inner_text() == "{:,} triangles - edited".format(cut)
+    assert page.locator("#step-2 [aria-pressed=true]").count() == 0
+    # Low again, then a non-detail edit: no level is active any more; Low then warns again
+    tap_detail(page, "low")
+    page.locator("#btn-rot-x").tap()
+    assert page.locator("#step-2 [aria-pressed=true]").count() == 0
+    tap_detail(page, "low")
+    assert "starts again from the model as generated" in page.locator("#msg").inner_text()
+
+
+def test_level_without_edits_does_not_warn(page):
+    open_sphere(page, 30000)
+    tap_detail(page, "low")
+    assert "starts again" not in page.locator("#msg").inner_text()
+    page.locator("#btn-undo").tap()
+    assert tri_count(page) == 30000
+    assert page.locator("#detail-info").inner_text() == "30,000 triangles - as loaded"
+
+
+def test_slice_hint_points_to_high(browser, tiny_limit_server):
+    pg = new_page(browser, tiny_limit_server)
+    open_sample(pg, "two_cubes.stl", rows=2)
+    assert pg.locator("#btn-slice").is_disabled()
+    assert "Tap Detail: High" in pg.locator("#slice-hint").inner_text()
+    pg.context.close()
+
+
+def test_undo_limit_tiers(page):
+    def limit(n):
+        return page.evaluate("""n => { const m = I3DApp.state.model; I3DApp.state.model = [{v: [], t: new Array(n * 3).fill(0)}];
+          const k = I3DApp.undoLimit(); I3DApp.state.model = m; return k; }""", n)
+    assert limit(600000) == 2
+    assert limit(500001) == 2 and limit(500000) == 5
+    assert limit(200000) == 5
+    assert limit(50000) == 20
+
+
+def test_detail_low_on_a_full_detail_model(page):
+    """About 900,000 triangles (a full-detail generation): Low finishes, the model stays closed; time is printed."""
+    import time
+    open_sphere(page, 900000)
+    assert page.locator("#detail-info").inner_text() == "900,000 triangles - as loaded"
+    t0 = time.time()
+    tap_detail(page, "low", timeout=120000)
+    took = time.time() - t0
+    print("\nLow on 900,000 triangles in the test browser: %.1f s" % took)
+    assert near(tri_count(page), 25000)
+    assert page.evaluate("I3DApp.state.model.every(I3D.mesh.isClosed)")
+    assert page.errors == []
