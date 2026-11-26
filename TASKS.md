@@ -116,7 +116,7 @@ Legend: `[x]` done, `[ ]` open, `[~]` in progress, `[!]` blocked
 - [ ] SL12 (J) Look at the new page flow on the phone (after merge and redeploy); say what is still awkward
 - [x] SL11 (C) Printer dropdown: P1S and A1 - script-checked with the real engine 2026-11-24 (A1 mini deliberately not offered: see PROGRESS.md)
 - [ ] SL13 (J) First A1 slice, send and print (A1 has its own IP and access code; Shortcut "Send to A1" is separate)
-- [ ] SL14 (C) Detail levels Low/Medium/High/Large; generate at full detail (design `docs/superpowers/specs/2026-11-26-detail-levels-design.md`)
+- [x] SL14 (C) Detail levels Low/Medium/High/Large; generate at full detail (design `docs/superpowers/specs/2026-11-26-detail-levels-design.md`) - desktop-tested 2026-11-26
 - [ ] SL15 (J) After merge: Render Blueprint Manual sync, then generate one model and try the Detail buttons on the phone
 - [ ] (parked) A1 mini: needs a start G-code that stays inside the 180 mm bed, verified on a real mini
 

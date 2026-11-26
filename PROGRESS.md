@@ -5,13 +5,13 @@ Status key: DONE / IN PROGRESS / BLOCKED / NEXT. Task IDs refer to [TASKS.md](TA
 
 ## Current status
 
-_(updated at the end of every step)_
+_(updated at the end of every step; as of 2026-11-26)_
 
 - **Phase:** 0 complete; Phase 1 (prove the pipeline on the real printer) is next and needs Jacob
-- **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13 (after a manual Blueprint sync). Confirmed by Jacob on real hardware: a slice finishes on the free instance, the phone downloads `model.gcode.3mf`, the phone uploads it to the printer over Wi-Fi (a-Shell + curl, LAN-only and Developer Mode off, Handy kept), and the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: centre part fine, two small parts came loose; adhesion).
-- **Mirror (branch `mirror`, PR #12 open):** a Mirror button in the editor's Cut panel keeps one side of the plane and copies it across, so both sides match. Verification: script-checked maths (Node) and a desktop browser at phone size (Playwright). NOT verified: a real phone, a real generated model.
-- **Send to printer (branch `send-helpers`, PR #13 open):** the slice result can copy a one-line a-Shell command, or open the "Send to P1S" iPhone Shortcut, to send the file to the printer over Wi-Fi. Desktop-tested and checked with a real curl; NOT tried on the phone.
-- **Now:** waiting on Jacob for Phase 1 (T1.1); Claude can start Phase 2 CAD. Side tool `image3d/`: Jacob's open items are SL9 (try the send box and Shortcut), SL5 (a clean first print: wash the plate, load filament first) and SL7 (try Mirror on the phone).
+- **Slice for P1S (merged, PR #11):** live on Render since 2026-11-13. Confirmed on real hardware: slice on the free instance, download to the phone, upload to the printer over Wi-Fi (a-Shell + curl), the printer starts it. NOT yet achieved: a print that finishes cleanly (first attempt: two small parts came loose).
+- **Image3D page (merged):** numbered steps 1-4 with the passcode at the top; Printer dropdown for P1S or A1 (the A1 mini is not offered); Generate and the passcode no longer vanish while the Render server wakes up. Mirror and Send to printer are in (desktop-tested; not tried on a phone).
+- **Detail levels (branch `detail-levels`, not yet pushed or merged):** Low / Medium / High / Large row in step 2, server generates at the Space's default detail. Desktop-tested; NOT tried on a phone or Render. After merge Jacob must run Manual sync on the Render Blueprint.
+- **Now:** waiting on Jacob. Jacob's open items for `image3d/`: SL5 (a clean first print), SL7 (try Mirror on the phone), SL9 (try the send box and Shortcut), SL12, SL13 (first A1 slice), SL15 (after merge: Manual sync, try Detail on the phone).
 - **Next:** T1.1 - Jacob opens `examples/cube_disk_2color.3mf` in Bambu Studio. Claude can start walker CAD (Phase 2) in parallel.
 
 ## Log
@@ -510,3 +510,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 ### 2026-11-26 - Detail levels, Task 3 review follow-ups
 - DONE: Large on the model as loaded (unedited) adds no undo step and no re-render; it marks Large and says "Already the model as generated." "Already at <level>" only when the model was made with today's target (the target is remembered, also in undo steps), so High is recomputed after the server's slice limit arrives. `triangleCount()` reuses `countOf`. Tests tidied (one Detail heading check, no unasserted tap, no printing); 2 new page tests. `image3d.html` rebuilt.
 - Verification: desktop-tested; full `python -m pytest -q image3d/tests gui/tests`: 436 passed. NEXT: remaining detail-levels tasks. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 4: docs and full test run
+- DONE: `image3d/PRINTING.md` and `image3d/README.md` describe the Detail row (Low / Medium / High / Large; Large is for Bambu Studio via Export STL, the site's Slice needs High or lower); `image3d/PROGRESS.md` Step 28 and SL15 in "What Jacob does next"; `TASKS.md` SL14 checked (desktop-tested); "Current status" above refreshed.
+- Verification: `python -m pytest -q image3d/tests gui/tests`: 436 passed (4 min 12 s); `cd firmware && python -m pytest -q`: 39 passed. Step 2 screenshot at 390x844 with `two_cubes.stl` looked right (Detail row first, "24 triangles - as loaded"); the "Opened ..." status line overlaps the step-1 note text slightly. NOT verified: a phone, Render, a real generated model.
+- NEXT: push and PR (controller); after merge Jacob runs Manual sync on the Render Blueprint, then SL15. BLOCKED: nothing.
