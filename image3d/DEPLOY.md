@@ -34,7 +34,7 @@ The "Slice for P1S" section comes with a new build step (`bash slicer/install.sh
 ## Troubleshooting
 - First load takes about a minute: the free Render instance sleeps when idle and has to wake up. Reload after a minute.
 - Message mentions quota: the daily free GPU time on Hugging Face is used up. Try again later (it resets daily).
-- Message says server not configured: HF_EXTRA_JSON: that value in Render is not a valid JSON object; the default is `{"octree_resolution": 128}`.
+- Message says server not configured: HF_EXTRA_JSON: that value in Render is not a valid JSON object; the default is `{}`.
 - Message says wrong passcode: the passcode must match `IMAGE3D_PASSCODE` in Render exactly. Message says server not configured: `HF_TOKEN` or `IMAGE3D_PASSCODE` is missing in Render (Environment tab).
 - Message says too many attempts: wait 10 minutes and try again. After 5 wrong passcodes the server refuses that phone for 10 minutes, and if many wrong passcodes arrive from anywhere it refuses everyone for a while.
 - Space asleep, busy or errors: wait and retry, or switch Space. The default is `tencent/Hunyuan3D-2` with the endpoint `/shape_generation`, which makes the shape only (no texture). That suits printing. To switch, open the service in Render, Environment, and set these four values together, then save (Render redeploys):
@@ -45,4 +45,5 @@ The "Slice for P1S" section comes with a new build step (`bash slicer/install.sh
   - `SLICE_MEM_MARGIN_MB` (default 40): the slicer is stopped with "out of memory" when the container's memory use gets within this many MB of its limit (read from the cgroup files `memory.current` and `memory.max`).
   - `SLICE_MEM_LIMIT_MB` (default 470): used only when those cgroup files are not available: the slicer is stopped when its memory plus the web server's exceeds this many MB.
   A different Space may need code changes if its inputs or outputs differ. Only the default Space has been run for real.
-- Model too heavy or too coarse: detail is set by `HF_EXTRA_JSON` in Render (Environment). The default `{"octree_resolution": 128}` gives about 115,000 triangles. `96` gives about 55,000 (faster on the phone, less detail); `256` gives about 900,000 (too heavy for a phone).
+- Model too heavy or too coarse: detail is set by `HF_EXTRA_JSON` in Render (Environment). The default `{}` leaves the Space at its own default detail. For reference, `{"octree_resolution": 128}` gave about 115,000 triangles, `96` about 55,000 (faster on the phone, less detail) and `256` about 900,000 (too heavy for a phone).
+- After the change that made `{}` the default is merged, run Manual sync on the Render Blueprint (dashboard > Blueprints > image3d > Manual sync) so the new `HF_EXTRA_JSON` value in `render.yaml` takes effect.

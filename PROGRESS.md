@@ -485,3 +485,8 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - DONE: Jacob asked for a triangle-count control with a full-detail option for Bambu Studio and said "start this now" (displaces the rest of this week's time for the bird color-by-number book; likely 1-3 h over the weekly budget). He chose approach B (always generate at full detail, reduce in the page) and approved the design: `docs/superpowers/specs/2026-11-26-detail-levels-design.md`. TASKS SL14, SL15 added.
 - NEXT: plan, then build on branch `detail-levels`.
 - BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 1: server generates at full detail
+- DONE: `DEFAULT_EXTRA` in `image3d/server.py` is now `{}` and `render.yaml` sets `HF_EXTRA_JSON` to `'{}'`, so the Space generates at its own default detail. `HF_EXTRA_JSON` env override still works. DEPLOY.md updated, with a note to run Manual sync on the Render Blueprint after merge.
+- Verification: script-checked (`pytest image3d/tests/test_server.py`, 74 pass). NOT tried on Render or a live Space.
+- NEXT: later detail-level tasks. BLOCKED: nothing (Jacob must run Manual sync after merge).

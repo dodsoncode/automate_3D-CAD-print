@@ -5,7 +5,7 @@
 Env: HF_TOKEN (Hugging Face read token), IMAGE3D_PASSCODE (shared passcode),
      HF_SPACE (default tencent/Hunyuan3D-2), HF_API_NAME (default /shape_generation; set it to an empty
      string to auto-pick an endpoint), HF_IMAGE_PARAM (default image: the keyword the endpoint takes the photo in),
-     HF_EXTRA_JSON (extra settings for the call as a JSON object; default {"octree_resolution": 128} for the default Space).
+     HF_EXTRA_JSON (extra settings for the call as a JSON object; default empty, so the Space uses its own default detail).
 Everything is read per request, so the tests can set it with monkeypatch.
 """
 import concurrent.futures
@@ -206,14 +206,15 @@ def _pick_endpoint(client):
     raise RuntimeError("could not find a generate endpoint on %s; set HF_API_NAME (see DEPLOY.md)" % HF_SPACE)
 
 
-# Hunyuan3D-2 at its default resolution (256) returns about 900,000 triangles, too heavy for a phone;
-# 128 gives about 115,000 and 96 about 55,000 (measured on a live run, 2026-11-11).
-DEFAULT_EXTRA = {"octree_resolution": 128}
+# No extra settings: the Space generates at its own default detail. The page reduces the mesh to the chosen
+# detail level afterwards. (For reference, Hunyuan3D-2 at its default octree_resolution 256 returns about
+# 900,000 triangles; 128 gives about 115,000 and 96 about 55,000, measured 2026-11-11.)
+DEFAULT_EXTRA = {}
 
 
 def _extra_settings(space, image_param):
-    """Extra keyword settings for the Space call, from HF_EXTRA_JSON (a JSON object). Unset: the lighter-mesh
-    default for the default Space, nothing for any other Space."""
+    """Extra keyword settings for the Space call, from HF_EXTRA_JSON (a JSON object). Unset: DEFAULT_EXTRA
+    (nothing, so the Space uses its own default detail) for the default Space, nothing for any other Space."""
     raw = os.environ.get("HF_EXTRA_JSON")
     if raw is None or not raw.strip():
         return dict(DEFAULT_EXTRA) if space == DEFAULT_SPACE else {}

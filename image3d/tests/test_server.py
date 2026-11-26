@@ -160,7 +160,11 @@ def test_generate_glb_with_fake_gradio_client(monkeypatch, tmp_path, new_style):
     calls = _fake_gradio(monkeypatch, tmp_path, new_style)
     assert server.generate_glb(PNG, "photo.png") == GLB
     assert calls == {"space": "tencent/Hunyuan3D-2", "token": "hf_fake", "api_name": "/shape_generation",
-                     "args": (), "kwargs": {"image": "FILE:photo.png", "octree_resolution": 128}, "timeout": 300}
+                     "args": (), "kwargs": {"image": "FILE:photo.png"}, "timeout": 300}
+
+
+def test_default_extra_is_empty():
+    assert server.DEFAULT_EXTRA == {}
 
 
 def test_timeout_cancels_the_job_and_answers_503(client, monkeypatch, tmp_path):
@@ -183,7 +187,7 @@ def test_generate_glb_image_param_and_space_from_env(monkeypatch, tmp_path):
 
 
 def test_generate_glb_extra_settings_from_env(monkeypatch, tmp_path):
-    # HF_EXTRA_JSON adds keyword settings to the Space call; the default asks Hunyuan3D-2 for a lighter mesh
+    # HF_EXTRA_JSON adds keyword settings to the Space call; the default sends nothing, so the Space uses its own default detail
     calls = _fake_gradio(monkeypatch, tmp_path, True)
     monkeypatch.setenv("HF_EXTRA_JSON", '{"octree_resolution": 96, "steps": 20}')
     server.generate_glb(PNG, "photo.png")
