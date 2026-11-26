@@ -496,3 +496,7 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - Tests (written first, `image3d/tests/test_simplify.py`, 9): sphere 20k -> 2,000 (closed, volume and size kept), under target unchanged, budget split with a floor of 4 over 302 shells, flat-faced box does not fold (volume kept exactly), open grid keeps its border, tube stays closed, speed. Speed: 900,000 -> 142,500 triangles in 2.4 s under Node on this machine (bumpy 900k sphere 4.2 s); about 165 MB of working buffers for 900k.
 - Verification: script-checked (Node). NOT verified: speed and memory on an iPhone, a real generated model.
 - NEXT: Task 3, the Detail row in step 2. BLOCKED: nothing.
+
+### 2026-11-26 - Detail levels, Task 2 review follow-ups
+- DONE: a target that is not a finite positive number (null, NaN, 0, negative) now returns the model unchanged (test added); the tube test checks it was really reduced; new speed case 900,000 -> 25,000 (about 3 s under Node); the module header claims Node speed only. `image3d.html` rebuilt.
+- Verification: script-checked (`test_simplify.py` + `test_mesh.py`, 39 pass). NEXT: Task 3. BLOCKED: nothing.

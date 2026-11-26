@@ -5,11 +5,13 @@
  *
  *   simplifyModel(model, target) -> model   each shell gets max(4, round(target x shellTris / totalTris))
  *   simplifyShell(shell, target) -> shell
+ * A target that is not a finite positive number (null, NaN, 0, negative) returns the input unchanged (copies).
  *
  * Kept safe: a collapse is refused if it would break the link condition (the mesh stays manifold, so a closed shell
  * stays closed), turn any neighbouring triangle by more than ~78 degrees (normal dot < 0.2), or take a closed shell
  * below a tetrahedron. Border edges of open shells carry a heavy penalty plane, so the outline stays put.
- * Typed arrays and a binary heap with lazy invalidation keep it fast enough for ~900k triangles on a phone.
+ * Typed arrays and a binary heap with lazy invalidation: 900k -> 142.5k triangles in about 2.5 s under Node
+ * (not measured on a phone).
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -21,13 +23,16 @@
   var BORDER_WEIGHT = 1000;  // penalty plane on open borders, times edge length squared
   var COND = 1e-12;          // |det| / trace^3 below this: the 3x3 solve is ill conditioned
 
+  function goodTarget(x) { return typeof x === 'number' && isFinite(x) && x > 0; }
+
   function copyShell(s) { return { v: Array.prototype.slice.call(s.v), t: Array.prototype.slice.call(s.t) }; }
 
   function grownF64(a, need) { var b = new Float64Array(Math.max(need, a.length * 2)); b.set(a); return b; }
   function grownI32(a, need) { var b = new Int32Array(Math.max(need, a.length * 2)); b.set(a); return b; }
 
   function simplifyShell(shell, target) {
-    target = Math.max(MIN_TRIS, Math.round(target) || 0);
+    if (!goodTarget(target)) return copyShell(shell);
+    target = Math.max(MIN_TRIS, Math.round(target));
     var nt = shell.t.length / 3;
     if (nt <= target) return copyShell(shell);
     var nv = shell.v.length / 3, i, k, f;
@@ -297,6 +302,7 @@
   }
 
   function simplifyModel(model, target) {
+    if (!goodTarget(target)) return model.map(copyShell);
     var total = 0;
     model.forEach(function (s) { total += s.t.length / 3; });
     if (total <= target) return model.map(copyShell);

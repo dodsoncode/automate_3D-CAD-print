@@ -123,6 +123,16 @@ console.log(JSON.stringify({n:r.length,v:r[0].v,t:r[0].t,sv:s.v,st:s.t,c:c}));""
     assert o["sv"] == o["c"]["v"] and o["st"] == o["c"]["t"]
 
 
+def test_bad_target_returns_input_unchanged():
+    o = node("""const s=sphere(50,125,81), out={};
+[['null',null],['undef',undefined],['nan',NaN],['zero',0],['neg',-5],['inf',Infinity]].forEach(([k,x])=>{
+  const m=simp.simplifyModel([s],x)[0], h=simp.simplifyShell(s,x);
+  out[k]=JSON.stringify(m.v)===JSON.stringify(s.v)&&JSON.stringify(m.t)===JSON.stringify(s.t)&&
+         JSON.stringify(h.v)===JSON.stringify(s.v)&&JSON.stringify(h.t)===JSON.stringify(s.t)&&m.t!==s.t&&h.t!==s.t;});
+console.log(JSON.stringify(out));""")
+    assert o == {"null": True, "undef": True, "nan": True, "zero": True, "neg": True, "inf": True}
+
+
 def test_budget_split_by_size_and_floor_of_4():
     o = node("""const m=[sphere(50,125,81),cube(20,[200,0,0])];
 for(let i=0;i<300;i++)m.push(tetra(0.5,[-100-(i%20)*2,(Math.floor(i/20))*2,0]));
@@ -154,7 +164,7 @@ console.log(JSON.stringify({tris:tris(r),b0:b0,b1:b1}));""")
 def test_tube_stays_closed():
     o = node("""const t=tube();const r=simp.simplifyModel([t],8);
 console.log(JSON.stringify({tris:tris(r),closed:mesh.isClosed(r[0]),n:r.length}));""")
-    assert o["n"] == 1 and o["closed"] is True and o["tris"] <= 32
+    assert o["n"] == 1 and o["closed"] is True and o["tris"] < 32
 
 
 def test_speed():
@@ -164,4 +174,13 @@ console.log(JSON.stringify({n0:n0,tris:tris(r),closed:mesh.isClosed(r[0]),ms:ms}
     print("simplify 900,000 -> 142,500 triangles: %.1f s" % (o["ms"] / 1000))
     assert o["n0"] == 900000
     assert 0.9 * 142500 <= o["tris"] <= 142500 and o["closed"] is True
+    assert o["ms"] < 30000
+
+
+def test_speed_to_low():
+    o = node("""const s=sphere(50,900,501);const t0=Date.now();
+const r=simp.simplifyModel([s],25000);const ms=Date.now()-t0;
+console.log(JSON.stringify({tris:tris(r),closed:mesh.isClosed(r[0]),ms:ms}));""", timeout=300)
+    print("simplify 900,000 -> 25,000 triangles: %.1f s" % (o["ms"] / 1000))
+    assert 0.9 * 25000 <= o["tris"] <= 25000 and o["closed"] is True
     assert o["ms"] < 30000
