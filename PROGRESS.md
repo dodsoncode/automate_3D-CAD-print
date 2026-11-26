@@ -479,3 +479,9 @@ Multi-step request: (1) kid-friendly hardware, (2) design doc + plan updates, (3
 - NOT verified: a real cold start on Render from the phone (the sleeping server was simulated in a desktop browser).
 - NEXT: Jacob says merge; then he reloads the site (it may sit on "Waking the server..." for up to a minute), checks the picture picker and Generate, and tries the first A1 slice (SL13).
 - BLOCKED: nothing.
+
+### 2026-11-26 - PR #16 merged; Detail levels started
+- DONE: PR #16 (Generate and passcode stay visible while the server wakes) merged to `main` (394f876) on 2026-11-25 at Jacob's request.
+- DONE: Jacob asked for a triangle-count control with a full-detail option for Bambu Studio and said "start this now" (displaces the rest of this week's time for the bird color-by-number book; likely 1-3 h over the weekly budget). He chose approach B (always generate at full detail, reduce in the page) and approved the design: `docs/superpowers/specs/2026-11-26-detail-levels-design.md`. TASKS SL14, SL15 added.
+- NEXT: plan, then build on branch `detail-levels`.
+- BLOCKED: nothing.
