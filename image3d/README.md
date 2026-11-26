@@ -17,6 +17,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `js/mesh.js`, `js/stl.js` | Mesh maths (weld, split, scale, rotate, lay flat, cut, mirror, closed check) and STL read/write |
 | `vendor/earcut.min.js` | Polygon triangulation for cut caps (earcut 2.2.4, ISC; see `vendor/LICENSES.txt`) |
 | Slicer licences | the slicer engine (npm `orcaslicer-addon`, AGPL-3.0-only) and OrcaSlicer's Bambu profiles (AGPL-3.0) are downloaded at build time and run unmodified in a separate process; nothing from them is committed to this repo. Revisit the licence terms if the service is ever opened to other people. |
+| `js/simplify.js` | Triangle reduction (quadric edge collapse) for the Detail buttons |
 | `js/glb.js`, `js/obj.js`, `js/readany.js` | File readers (GLB, OBJ; `readany.js` picks by extension, STL goes through `stl.js`) |
 | `server.py` | FastAPI app for Render: serves the page, `GET /api/health`, `POST /api/generate` via a Hugging Face Space, and the slice job routes (`GET /api/slice/options`, `POST /api/slice`, `GET /api/slice/{id}`, `GET /api/slice/{id}/file`) |
 | `slicing.py`, `slicer/` | Slice for P1S: OrcaSlicer engine wrapper with option tables, model centring and the G-code safety checks; `slicer/install.sh` installs Node, the engine and Bambu's profiles at build time (always exits 0) |
@@ -24,7 +25,7 @@ A phone-friendly page to open a 3D mesh (GLB, OBJ or STL), delete pieces, resize
 | `requirements.txt` | Python dependencies for the server |
 | `../render.yaml` | Render Blueprint (free web service, `rootDir: image3d`) |
 | `DEPLOY.md` | Phone steps for the Hugging Face token and the Render deploy, plus troubleshooting |
-| `tests/` | `test_mesh.py`, `test_readers.py`, `test_page.py`, `test_server.py`, `test_slicing.py`, `make_samples.py`, `samples/`; `e2e_slice.py` is a script (not run by pytest) for a real slice through the real server |
+| `tests/` | `test_mesh.py`, `test_readers.py`, `test_simplify.py`, `test_page.py`, `test_server.py`, `test_slicing.py`, `make_samples.py`, `samples/`; `e2e_slice.py` is a script (not run by pytest) for a real slice through the real server |
 
 ## Tests
 

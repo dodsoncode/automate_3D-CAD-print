@@ -192,7 +192,7 @@
   // original: the model as loaded or generated (never changed by edits); level: the detail level shown (null: none) and
   // target: the triangle target it was made with (Infinity for Large); edited: an edit other than a detail change since
   // the model was opened
-  var state = { model: [], selected: -1, original: null, level: null, target: null, edited: false };
+  var state = { model: [], selected: -1, original: null, level: null, target: null, edited: false, wasHigh: false };
   var undoStack = [], BED = 256, LIST_MAX = 30;
   var App = { state: state, serverMode: false };
   Object.defineProperty(App, 'bed', { get: function () { return BED; } });
@@ -352,16 +352,16 @@
   function apply(fn, okMsg, level, target) {
     var next;
     try { next = fn(state.model); } catch (e) { msg(e.message === 'cut removes everything' ? 'That cut would remove everything.' : e.message === 'mirror plane misses the model' ? 'Move the slider so the plane crosses the model, then tap Mirror.' : String(e.message || e), true); return false; }
-    undoStack.push({ model: state.model, level: state.level, target: state.target, edited: state.edited }); while (undoStack.length > undoLimit()) undoStack.shift();
+    undoStack.push({ model: state.model, level: state.level, target: state.target, edited: state.edited, wasHigh: state.wasHigh }); while (undoStack.length > undoLimit()) undoStack.shift();
     state.model = next; state.selected = -1;
-    if (level) { state.level = level; state.target = target; state.edited = false; } else { state.level = state.target = null; state.edited = true; }
+    if (level) { state.level = level; state.target = target; state.edited = false; state.wasHigh = level === 'high'; } else { state.level = state.target = null; state.edited = true; }
     refresh(); msg(okMsg || '');
     return true;
   }
   function undo() {
     if (!undoStack.length) { msg('Nothing to undo.'); return; }
     var u = undoStack.pop();
-    state.model = u.model; state.level = u.level; state.target = u.target; state.edited = u.edited; state.selected = -1; refresh(); msg('Undone.');
+    state.model = u.model; state.level = u.level; state.target = u.target; state.edited = u.edited; state.wasHigh = u.wasHigh; state.selected = -1; refresh(); msg('Undone.');
   }
   function needModel() { if (!state.model.length) { msg('Open a model first.', true); return false; } return true; }
 
@@ -390,14 +390,22 @@
     }
     // same level made with today's target (High follows the server's limit, which can arrive later)
     if (!state.edited && state.level === level && state.target === target) { msg('Already at ' + LEVEL_NAME[level] + '.'); return; }
-    if (level !== 'large' && have <= target && !state.edited) { msg('Already under ' + num(target) + ' triangles; nothing changed.'); return; }
+    if (level !== 'large' && have <= target && !state.edited && state.model === orig) {   // the original already fits: mark the level, change nothing
+      state.level = level; state.target = target; refreshDetail(); msg('Already under ' + num(target) + ' triangles; nothing changed.'); return;
+    }
     var reduce = have > target;
     reducing = true; refreshDetail(); msg(reduce ? 'Reducing...' : 'Loading the model as generated...');
     var run = function () {
       reducing = false;
       if (state.original !== orig) { refreshDetail(); return; }   // another model was opened meanwhile
       var again = state.edited ? ' This starts again from the model as generated; Undo brings your edits back.' : '';
-      if (!apply(function () { return reduce ? I3DSimplify.simplifyModel(orig, target) : orig; }, '', level, target)) { refreshDetail(); return; }
+      if (!apply(function () {
+        if (!reduce) return orig;
+        var out = I3DSimplify.simplifyModel(orig, target), n = countOf(out);
+        // High must be sliceable: one more pass from the original with the target scaled down by limit / result
+        if (level === 'high' && n > sliceLimit) out = I3DSimplify.simplifyModel(orig, Math.max(1, Math.floor(target * sliceLimit / n)));
+        return out;
+      }, '', level, target)) { refreshDetail(); return; }
       msg((level === 'large' ? 'Large: the model as generated (' + num(have) + ' triangles), for Bambu Studio.'
         : reduce ? LEVEL_NAME[level] + ': ' + num(triangleCount()) + ' triangles.'
         : 'The model as generated is already under ' + num(target) + ' triangles.') + again);
@@ -426,7 +434,7 @@
     var note = '', s = M.bbox(shells).size, longest = Math.max(s[0], s[1], s[2]);
     if (longest < 5 || longest > 256) { shells = M.scaleToLongest(shells, 100); note = 'Resized to 100 mm'; }
     state.model = M.layFlat(shells); state.selected = -1; undoStack = []; needsFit = true;
-    state.original = state.model; state.level = state.target = null; state.edited = false;
+    state.original = state.model; state.level = state.target = null; state.edited = false; state.wasHigh = false;
     refresh(); msg(note || 'Opened ' + name);
     return true;
   }
@@ -635,7 +643,11 @@
     var hint = '', off = false, n = triangleCount();
     if (slicing) off = true;
     else if (!state.model.length) { off = true; hint = 'Open a model to slice it.'; }
-    else if (n > sliceLimit) { off = true; hint = 'Model too detailed to slice here (' + n.toLocaleString('en-US') + ' triangles, limit ' + sliceLimit.toLocaleString('en-US') + ') - Tap Detail: High'; }
+    else if (n > sliceLimit) {
+      off = true;
+      hint = (state.level === 'high' || (state.edited && state.wasHigh)) ? 'Too many small pieces to slice here - tap Remove tiny bits, or Export STL for Bambu Studio'
+        : 'Model too detailed to slice here (' + n.toLocaleString('en-US') + ' triangles, limit ' + sliceLimit.toLocaleString('en-US') + ') - Tap Detail: High';
+    }
     else if (!state.model.every(M.isClosed)) hint = 'Model is not closed - slicing may fail';
     $('btn-slice').disabled = off; $('slice-hint').textContent = hint;
     SLICE_SELECTS.forEach(function (k) { $('slice-' + k).disabled = slicing; });
@@ -896,7 +908,7 @@
 
   initView();
   refresh();
-  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.detailTargets = detailTargets;
+  App.openBytes = openBytes; App.apply = apply; App.undo = undo; App.undoLimit = undoLimit; App.detailTargets = detailTargets; App.updateSliceControls = updateSliceControls;
   App.undoDepth = function () { return undoStack.length; };
   App.detailBusy = function () { return reducing; }; App.exportStl = exportStl; App.cutPreviewVisible = function () { return !!(glOk ? planeMesh.visible : cutActive && state.model.length); };
   App.ready = checkServer();

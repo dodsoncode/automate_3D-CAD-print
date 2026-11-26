@@ -1420,7 +1420,7 @@ SPHERE_JS = """([lon, lat]) => {
   for (let j = 0; j < lon; j++) t.push(S, ring(lat - 1, j + 1), ring(lat - 1, j));
   return I3DApp.openBytes('sphere.stl', I3D.stl.write([{v: v, t: t}], 'sphere'));
 }"""
-SPHERES = {30000: (150, 101), 200000: (500, 201), 900000: (1500, 301)}
+SPHERES = {30000: (150, 101), 40000: (200, 101), 100000: (250, 201), 200000: (500, 201), 900000: (1500, 301)}
 
 
 def open_sphere(pg, tris):
@@ -1509,7 +1509,7 @@ def test_under_target_says_so(page):
     assert page.locator("#msg").inner_text() == "Already under 60,000 triangles; nothing changed."
     assert tri_count(page) == before and rows(page) == 2
     assert page.locator("#btn-undo").is_disabled()
-    assert page.locator("#detail-info").inner_text() == "24 triangles - as loaded"
+    assert page.locator("#detail-info").inner_text() == "24 triangles - Medium"
 
 
 def test_level_after_edit_warns_and_undo_restores(page):
@@ -1604,4 +1604,58 @@ def test_detail_high_is_recomputed_when_the_slice_limit_arrives_later(browser, s
     assert near(tri_count(pg), 95000)
     assert pg.locator("#detail-info").inner_text() == "{:,} triangles - High".format(tri_count(pg))
     assert pg.errors == []
+    pg.context.close()
+
+
+def test_detail_high_after_low_restores_an_original_under_the_target(page):
+    """The model as generated is under High's target: High after Low brings it back (nothing is lost by switching)."""
+    open_sphere(page, 100000)
+    tap_detail(page, "low")
+    assert near(tri_count(page), 25000)
+    tap_detail(page, "high")
+    assert tri_count(page) == 100000
+    assert page.locator("#detail-info").inner_text() == "100,000 triangles - High"
+    assert page.locator("#msg").inner_text() == "The model as generated is already under 142,500 triangles."
+    assert page.errors == []
+
+
+def test_detail_medium_after_low_restores_an_original_under_the_target(page):
+    open_sphere(page, 40000)
+    tap_detail(page, "low")
+    assert near(tri_count(page), 25000)
+    tap_detail(page, "medium")
+    assert tri_count(page) == 40000
+    assert page.locator("#detail-info").inner_text() == "40,000 triangles - Medium"
+    assert page.errors == []
+
+
+def test_detail_already_under_marks_the_level_active(page):
+    open_sphere(page, 30000)
+    tap_detail(page, "medium")
+    assert page.locator("#msg").inner_text() == "Already under 60,000 triangles; nothing changed."
+    assert page.get_attribute("#detail-medium", "aria-pressed") == "true"
+    assert page.locator("#step-2 [aria-pressed=true]").count() == 1
+    assert page.locator("#detail-info").inner_text() == "30,000 triangles - Medium"
+    assert tri_count(page) == 30000 and page.evaluate("I3DApp.undoDepth()") == 0
+
+
+def test_detail_high_second_pass_gets_under_the_limit(browser, tiny_limit_server):
+    pg = new_page(browser, tiny_limit_server)            # limit 10, High target 9
+    open_sphere(pg, 30000)
+    tap_detail(pg, "high")
+    assert tri_count(pg) <= 10
+    assert pg.errors == []
+    pg.context.close()
+
+
+def test_detail_slice_hint_when_high_is_still_too_big(browser, tiny_limit_server):
+    pg = new_page(browser, tiny_limit_server)
+    open_sphere(pg, 30000)
+    # pretend High left too much (e.g. many small shells that cannot shrink further)
+    pg.evaluate("I3DApp.state.level = 'high'; I3DApp.state.model = [{v: [], t: new Array(60).fill(0)}]; I3DApp.updateSliceControls()")
+    assert pg.locator("#slice-hint").inner_text() == "Too many small pieces to slice here - tap Remove tiny bits, or Export STL for Bambu Studio"
+    pg.evaluate("I3DApp.state.level = null; I3DApp.state.edited = true; I3DApp.state.wasHigh = true; I3DApp.updateSliceControls()")
+    assert pg.locator("#slice-hint").inner_text().startswith("Too many small pieces")
+    pg.evaluate("I3DApp.state.level = 'low'; I3DApp.state.wasHigh = false; I3DApp.updateSliceControls()")
+    assert "Tap Detail: High" in pg.locator("#slice-hint").inner_text()
     pg.context.close()
